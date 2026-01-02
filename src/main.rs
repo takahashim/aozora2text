@@ -2,14 +2,9 @@
 
 use std::fs;
 use std::io::{self, Read, Write};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use clap::Parser;
-
-use aozora2text::document::extract_body_lines;
-use aozora2text::encoding::decode_to_utf8;
-use aozora2text::extractor;
-use aozora2text::tokenizer::Tokenizer;
 
 #[derive(Parser)]
 #[command(name = "aozora2text")]
@@ -22,37 +17,39 @@ struct Args {
     /// 出力ファイル（省略時は標準出力）
     #[arg(short, long)]
     output: Option<PathBuf>,
+
+    /// 入力をZIPファイルとして扱う
+    #[arg(short, long)]
+    zip: bool,
 }
 
 fn main() -> io::Result<()> {
     let args = Args::parse();
 
     // 入力読み込み
-    let bytes = match &args.input {
-        Some(path) => fs::read(path)?,
-        None => {
-            let mut buf = Vec::new();
-            io::stdin().read_to_end(&mut buf)?;
-            buf
+    let bytes = if args.zip {
+        // ZIPモード
+        let path = args.input.as_ref().ok_or_else(|| {
+            io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "ZIP mode requires an input file",
+            )
+        })?;
+        read_first_txt_from_zip(path)?
+    } else {
+        // 通常モード
+        match &args.input {
+            Some(path) => fs::read(path)?,
+            None => {
+                let mut buf = Vec::new();
+                io::stdin().read_to_end(&mut buf)?;
+                buf
+            }
         }
     };
 
-    // エンコーディング判定・変換（UTF-8 or Shift_JIS）
-    let text = decode_to_utf8(&bytes);
-
-    // 本文抽出
-    let lines: Vec<&str> = text.lines().collect();
-    let body_lines = extract_body_lines(&lines);
-
-    // 各行をトークナイズ→プレーンテキスト化
-    let mut output = String::new();
-    for line in body_lines {
-        let mut tokenizer = Tokenizer::new(line);
-        let tokens = tokenizer.tokenize();
-        let plain = extractor::extract(&tokens);
-        output.push_str(&plain);
-        output.push('\n');
-    }
+    // 変換
+    let output = aozora2text::convert(&bytes);
 
     // 出力
     match &args.output {
@@ -61,4 +58,34 @@ fn main() -> io::Result<()> {
     }
 
     Ok(())
+}
+
+/// ZIPから最初の.txtファイルを読み込む
+fn read_first_txt_from_zip(path: &Path) -> io::Result<Vec<u8>> {
+    let file = fs::File::open(path)?;
+    let mut archive = zip::ZipArchive::new(file).map_err(|e| {
+        io::Error::new(
+            io::ErrorKind::InvalidData,
+            format!("failed to read ZIP archive: {}", e),
+        )
+    })?;
+
+    // .txt ファイルを探す
+    for i in 0..archive.len() {
+        let mut entry = archive
+            .by_index(i)
+            .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e.to_string()))?;
+
+        let name = entry.name().to_lowercase();
+        if name.ends_with(".txt") && !entry.is_dir() {
+            let mut buf = Vec::new();
+            entry.read_to_end(&mut buf)?;
+            return Ok(buf);
+        }
+    }
+
+    Err(io::Error::new(
+        io::ErrorKind::NotFound,
+        "no .txt file found in ZIP archive",
+    ))
 }
