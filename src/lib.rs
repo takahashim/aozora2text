@@ -44,16 +44,28 @@ pub fn convert(input: &[u8]) -> String {
     let lines: Vec<&str> = text.lines().collect();
     let body_lines = document::extract_body_lines(&lines);
 
-    body_lines
+    let converted: Vec<String> = body_lines
         .iter()
         .map(|line| {
             let mut tokenizer = tokenizer::Tokenizer::new(line);
             let tokens = tokenizer.tokenize();
             extractor::extract(&tokens)
         })
-        .collect::<Vec<_>>()
-        .join("\n")
-        + "\n"
+        .collect();
+
+    // 冒頭と末尾の空行を削除
+    let start = converted.iter().position(|s| !s.is_empty()).unwrap_or(0);
+    let end = converted
+        .iter()
+        .rposition(|s| !s.is_empty())
+        .map(|i| i + 1)
+        .unwrap_or(0);
+
+    if start >= end {
+        String::new()
+    } else {
+        converted[start..end].join("\n") + "\n"
+    }
 }
 
 /// 青空文庫形式の文字列をプレーンテキストに変換（本文抽出なし）
