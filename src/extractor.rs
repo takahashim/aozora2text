@@ -3,36 +3,31 @@
 use crate::gaiji::convert_gaiji;
 use crate::token::Token;
 
-/// トークン列からプレーンテキストを抽出
-pub struct PlainTextExtractor;
+/// トークン列をプレーンテキストに変換
+pub fn extract(tokens: &[Token]) -> String {
+    tokens.iter().map(extract_token).collect()
+}
 
-impl PlainTextExtractor {
-    /// トークン列をプレーンテキストに変換
-    pub fn extract(tokens: &[Token]) -> String {
-        tokens.iter().map(Self::extract_token).collect()
-    }
+/// 単一トークンからテキストを抽出
+fn extract_token(token: &Token) -> String {
+    match token {
+        // テキスト: そのまま出力
+        Token::Text(s) => s.clone(),
 
-    /// 単一トークンからテキストを抽出
-    fn extract_token(token: &Token) -> String {
-        match token {
-            // テキスト: そのまま出力
-            Token::Text(s) => s.clone(),
+        // 暗黙ルビ: 削除（親文字は直前のTextに含まれる）
+        Token::Ruby { .. } => String::new(),
 
-            // 暗黙ルビ: 削除（親文字は直前のTextに含まれる）
-            Token::Ruby { .. } => String::new(),
+        // 明示ルビ: 親文字部分のみ抽出
+        Token::PrefixedRuby { base_children, .. } => extract(base_children),
 
-            // 明示ルビ: 親文字部分のみ抽出
-            Token::PrefixedRuby { base_children, .. } => Self::extract(base_children),
+        // コマンド: 削除
+        Token::Command { .. } => String::new(),
 
-            // コマンド: 削除
-            Token::Command { .. } => String::new(),
+        // 外字: Unicode文字列に変換
+        Token::Gaiji { description } => convert_gaiji(description),
 
-            // 外字: Unicode文字列に変換
-            Token::Gaiji { description } => convert_gaiji(description),
-
-            // アクセント: 内容を抽出
-            Token::Accent { children } => Self::extract(children),
-        }
+        // アクセント: 内容を抽出
+        Token::Accent { children } => extract(children),
     }
 }
 
@@ -41,41 +36,41 @@ mod tests {
     use super::*;
     use crate::tokenizer::Tokenizer;
 
-    fn extract(input: &str) -> String {
+    fn tokenize_and_extract(input: &str) -> String {
         let mut tokenizer = Tokenizer::new(input);
         let tokens = tokenizer.tokenize();
-        PlainTextExtractor::extract(&tokens)
+        extract(&tokens)
     }
 
     #[test]
     fn test_plain_text() {
-        assert_eq!(extract("こんにちは"), "こんにちは");
+        assert_eq!(tokenize_and_extract("こんにちは"), "こんにちは");
     }
 
     #[test]
     fn test_ruby_removed() {
-        assert_eq!(extract("漢字《かんじ》"), "漢字");
+        assert_eq!(tokenize_and_extract("漢字《かんじ》"), "漢字");
     }
 
     #[test]
     fn test_prefixed_ruby() {
-        assert_eq!(extract("｜東京《とうきょう》"), "東京");
+        assert_eq!(tokenize_and_extract("｜東京《とうきょう》"), "東京");
     }
 
     #[test]
     fn test_command_removed() {
-        assert_eq!(extract("猫である［＃「である」に傍点］"), "猫である");
+        assert_eq!(tokenize_and_extract("猫である［＃「である」に傍点］"), "猫である");
     }
 
     #[test]
     fn test_gaiji_unicode() {
-        assert_eq!(extract("※［＃「丸印」、U+25CB］"), "○");
+        assert_eq!(tokenize_and_extract("※［＃「丸印」、U+25CB］"), "○");
     }
 
     #[test]
     fn test_complex() {
         assert_eq!(
-            extract("吾輩《わがはい》は猫《ねこ》である［＃「である」に傍点］"),
+            tokenize_and_extract("吾輩《わがはい》は猫《ねこ》である［＃「である」に傍点］"),
             "吾輩は猫である"
         );
     }
@@ -84,7 +79,7 @@ mod tests {
     fn test_gaiji_multichar() {
         // カ゚ = カ (U+30AB) + 半濁点 (U+309A)
         assert_eq!(
-            extract("カ゚※［＃半濁点付き片仮名カ、1-05-87］のテスト"),
+            tokenize_and_extract("カ゚※［＃半濁点付き片仮名カ、1-05-87］のテスト"),
             "カ゚カ゚のテスト"
         );
     }

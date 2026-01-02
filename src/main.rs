@@ -8,7 +8,7 @@ use clap::Parser;
 
 use aozora2text::document::extract_body_lines;
 use aozora2text::encoding::decode_to_utf8;
-use aozora2text::extractor::PlainTextExtractor;
+use aozora2text::extractor;
 use aozora2text::tokenizer::Tokenizer;
 
 #[derive(Parser)]
@@ -49,7 +49,7 @@ fn main() -> io::Result<()> {
     for line in body_lines {
         let mut tokenizer = Tokenizer::new(line);
         let tokens = tokenizer.tokenize();
-        let plain = PlainTextExtractor::extract(&tokens);
+        let plain = extractor::extract(&tokens);
         output.push_str(&plain);
         output.push('\n');
     }
