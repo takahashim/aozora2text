@@ -1,32 +1,33 @@
-//! 青空文庫形式をプレーンテキストに変換するCLIツール
+//! strip サブコマンド
+//!
+//! 青空文庫形式をプレーンテキストに変換
 
 use std::fs;
 use std::io::{self, Read, Write};
 use std::path::PathBuf;
 
 use aozora_core::zip::{is_zip_file, read_first_txt_from_zip};
-use clap::Parser;
+use clap::Args as ClapArgs;
 
-#[derive(Parser)]
-#[command(name = "aozora2text")]
-#[command(version)]
-#[command(about = "青空文庫形式をプレーンテキストに変換")]
-struct Args {
+use aozora2::strip;
+
+/// strip サブコマンドの引数
+#[derive(ClapArgs, Debug)]
+pub struct Args {
     /// 入力ファイル（省略時は標準入力）
-    input: Option<PathBuf>,
+    pub input: Option<PathBuf>,
 
     /// 出力ファイル（省略時は標準出力）
     #[arg(short, long)]
-    output: Option<PathBuf>,
+    pub output: Option<PathBuf>,
 
     /// 入力をZIPファイルとして扱う
     #[arg(short, long)]
-    zip: bool,
+    pub zip: bool,
 }
 
-fn main() -> io::Result<()> {
-    let args = Args::parse();
-
+/// strip サブコマンドを実行
+pub fn run(args: Args) -> io::Result<()> {
     // 入力読み込み
     let bytes = if args.zip {
         // ZIPモード
@@ -60,7 +61,7 @@ fn main() -> io::Result<()> {
     };
 
     // 変換
-    let output = aozora2text::convert(&bytes);
+    let output = strip::convert(&bytes);
 
     // 出力
     match &args.output {

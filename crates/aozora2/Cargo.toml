@@ -1,14 +1,21 @@
 [package]
-name = "aozora2text"
-version = "0.6.0"
+name = "aozora2"
+version = "0.1.0"
 edition.workspace = true
 license.workspace = true
 repository.workspace = true
-description = "Convert Aozora Bunko format to plain text"
-readme = "README.en.md"
+description = "Aozora Bunko format converter CLI"
 keywords = ["aozora", "bunko", "japanese", "text", "converter"]
 categories = ["command-line-utilities", "text-processing"]
 
+[[bin]]
+name = "aozora2"
+path = "src/main.rs"
+
+[lib]
+name = "aozora2"
+path = "src/lib.rs"
+
 [dependencies]
-aozora-core = { path = "../aozora-core" }
+aozora-core.workspace = true
 clap.workspace = true
