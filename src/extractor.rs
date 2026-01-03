@@ -1,5 +1,6 @@
 //! プレーンテキスト抽出
 
+use crate::accent::convert_accent;
 use crate::gaiji::convert_gaiji;
 use crate::token::Token;
 
@@ -26,8 +27,8 @@ fn extract_token(token: &Token) -> String {
         // 外字: Unicode文字列に変換
         Token::Gaiji { description } => convert_gaiji(description),
 
-        // アクセント: 内容を抽出
-        Token::Accent { children } => extract(children),
+        // アクセント: 内容を抽出してアクセント変換
+        Token::Accent { children } => convert_accent(&extract(children)),
     }
 }
 
@@ -59,7 +60,10 @@ mod tests {
 
     #[test]
     fn test_command_removed() {
-        assert_eq!(tokenize_and_extract("猫である［＃「である」に傍点］"), "猫である");
+        assert_eq!(
+            tokenize_and_extract("猫である［＃「である」に傍点］"),
+            "猫である"
+        );
     }
 
     #[test]
@@ -81,6 +85,20 @@ mod tests {
         assert_eq!(
             tokenize_and_extract("カ゚※［＃半濁点付き片仮名カ、1-05-87］のテスト"),
             "カ゚カ゚のテスト"
+        );
+    }
+
+    #[test]
+    fn test_accent_conversion() {
+        assert_eq!(tokenize_and_extract("〔cafe'〕"), "café");
+        assert_eq!(tokenize_and_extract("〔nai:ve〕"), "naïve");
+    }
+
+    #[test]
+    fn test_accent_in_sentence() {
+        assert_eq!(
+            tokenize_and_extract("彼は〔cafe'〕で珈琲《コーヒー》を飲んだ"),
+            "彼はcaféで珈琲を飲んだ"
         );
     }
 }

@@ -76,7 +76,7 @@ fn extract_jis_code(description: &str) -> Option<String> {
             result.push(c);
 
             // 続く数字を読む
-            while chars.peek().map_or(false, |c| c.is_ascii_digit()) {
+            while chars.peek().is_some_and(|c| c.is_ascii_digit()) {
                 result.push(chars.next().unwrap());
             }
 
@@ -85,7 +85,7 @@ fn extract_jis_code(description: &str) -> Option<String> {
                 result.push(chars.next().unwrap());
 
                 // 2番目の数字
-                while chars.peek().map_or(false, |c| c.is_ascii_digit()) {
+                while chars.peek().is_some_and(|c| c.is_ascii_digit()) {
                     result.push(chars.next().unwrap());
                 }
 
@@ -94,7 +94,7 @@ fn extract_jis_code(description: &str) -> Option<String> {
                     result.push(chars.next().unwrap());
 
                     // 3番目の数字
-                    while chars.peek().map_or(false, |c| c.is_ascii_digit()) {
+                    while chars.peek().is_some_and(|c| c.is_ascii_digit()) {
                         result.push(chars.next().unwrap());
                     }
 
@@ -117,15 +117,16 @@ fn extract_jis_code(description: &str) -> Option<String> {
 fn normalize_jis_code(code: &str) -> String {
     let parts: Vec<&str> = code.split('-').collect();
     if parts.len() == 3 {
-        format!(
-            "{}-{:0>2}-{:0>2}",
-            parts[0],
-            parts[1],
-            parts[2]
-        )
+        format!("{}-{:0>2}-{:0>2}", parts[0], parts[1], parts[2])
     } else {
         code.to_string()
     }
+}
+
+/// JISコードからUnicode文字列に変換
+pub fn jis_to_unicode(jis_code: &str) -> Option<String> {
+    let normalized = normalize_jis_code(jis_code);
+    JIS2UCS.get(normalized.as_str()).map(|&s| s.to_string())
 }
 
 #[cfg(test)]
@@ -141,8 +142,14 @@ mod tests {
 
     #[test]
     fn test_extract_jis_code() {
-        assert_eq!(extract_jis_code("「二の字点」、1-2-22"), Some("1-2-22".to_string()));
-        assert_eq!(extract_jis_code("「文字」、2-14-75"), Some("2-14-75".to_string()));
+        assert_eq!(
+            extract_jis_code("「二の字点」、1-2-22"),
+            Some("1-2-22".to_string())
+        );
+        assert_eq!(
+            extract_jis_code("「文字」、2-14-75"),
+            Some("2-14-75".to_string())
+        );
         assert_eq!(extract_jis_code("テスト"), None);
     }
 

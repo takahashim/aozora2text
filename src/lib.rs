@@ -20,6 +20,7 @@
 //! assert_eq!(plain, "吾輩は猫である");
 //! ```
 
+pub mod accent;
 pub mod document;
 pub mod encoding;
 pub mod extractor;
