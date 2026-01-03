@@ -123,6 +123,12 @@ fn normalize_jis_code(code: &str) -> String {
     }
 }
 
+/// JISコードからUnicode文字列に変換
+pub fn jis_to_unicode(jis_code: &str) -> Option<String> {
+    let normalized = normalize_jis_code(jis_code);
+    JIS2UCS.get(normalized.as_str()).map(|&s| s.to_string())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
