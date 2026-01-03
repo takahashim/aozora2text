@@ -1,6 +1,6 @@
 [package]
 name = "aozora2text"
-version = "0.5.0"
+version = "0.5.1"
 edition = "2021"
 description = "Convert Aozora Bunko format to plain text"
 license = "MIT"
