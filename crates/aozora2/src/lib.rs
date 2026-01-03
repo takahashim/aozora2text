@@ -19,3 +19,6 @@
 
 pub mod html;
 pub mod strip;
+
+// Re-export aozora-core for downstream crates
+pub use aozora_core;
