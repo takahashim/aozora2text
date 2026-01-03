@@ -86,10 +86,7 @@ impl Tokenizer {
         tokens
     }
 
-    /// 現在位置から n 文字先を覗く
-    fn peek_nth(&self, n: usize) -> Option<char> {
-        self.chars.get(self.pos + n).copied()
-    }
+    // --- トークン読み取り ---
 
     /// テキストトークンを読む（デリミタまで）
     fn read_text(&mut self) -> Token {
@@ -116,102 +113,53 @@ impl Tokenizer {
     /// コマンドトークンを読む ［＃...］
     /// ネストに対応（括弧の深さを追跡）
     fn read_command(&mut self) -> Token {
-        // ［＃ をスキップ
-        self.pos += 2;
+        self.skip(2); // ［＃
         let start = self.pos;
-        let mut depth = 1;
 
-        while self.pos < self.chars.len() && depth > 0 {
-            let ch = self.chars[self.pos];
-
-            if ch == COMMAND_BEGIN {
-                depth += 1;
-            } else if ch == COMMAND_END {
-                depth -= 1;
-            }
-
-            if depth > 0 {
-                self.pos += 1;
-            }
-        }
-
-        let content: String = self.chars[start..self.pos].iter().collect();
-
-        // ］ をスキップ
-        if self.pos < self.chars.len() && self.chars[self.pos] == COMMAND_END {
-            self.pos += 1;
-        }
+        self.advance_until_balanced(COMMAND_BEGIN, COMMAND_END);
+        let content = self.slice_from(start);
+        self.skip_if(COMMAND_END);
 
         Token::Command { content }
     }
 
     /// ルビトークンを読む 《...》
     fn read_ruby(&mut self) -> Token {
-        // 《 をスキップ
-        self.pos += 1;
+        self.skip(1); // 《
         let start = self.pos;
 
-        // 》 を探す
-        while self.pos < self.chars.len() && self.chars[self.pos] != RUBY_END {
-            self.pos += 1;
-        }
-
-        let content: String = self.chars[start..self.pos].iter().collect();
-
-        // 》 をスキップ
-        if self.pos < self.chars.len() && self.chars[self.pos] == RUBY_END {
-            self.pos += 1;
-        }
+        self.advance_until(RUBY_END);
+        let content = self.slice_from(start);
+        self.skip_if(RUBY_END);
 
         // ルビ内を再帰的にトークナイズ
-        let mut inner_tokenizer = Tokenizer::new(&content);
-        let children = inner_tokenizer.tokenize();
+        let children = Tokenizer::new(&content).tokenize();
 
         Token::Ruby { children }
     }
 
     /// 明示ルビトークンを読む ｜...《...》
     fn read_prefixed_ruby(&mut self) -> Token {
-        // ｜ をスキップ
-        self.pos += 1;
+        self.skip(1); // ｜
         let base_start = self.pos;
 
-        // 《 を探す
-        while self.pos < self.chars.len() && self.chars[self.pos] != RUBY_BEGIN {
-            self.pos += 1;
-        }
-
-        // 《 が見つからなかった場合
-        if self.pos >= self.chars.len() {
-            // ｜ をテキストとして返す（巻き戻し）
+        // 《 が見つからなければ ｜ をテキストとして返す
+        if !self.advance_until(RUBY_BEGIN) {
             self.pos = base_start;
             return Token::Text(RUBY_PREFIX.to_string());
         }
 
-        let base_content: String = self.chars[base_start..self.pos].iter().collect();
-
-        // 《 をスキップ
-        self.pos += 1;
+        let base_content = self.slice_from(base_start);
+        self.skip(1); // 《
         let ruby_start = self.pos;
 
-        // 》 を探す
-        while self.pos < self.chars.len() && self.chars[self.pos] != RUBY_END {
-            self.pos += 1;
-        }
-
-        let ruby_content: String = self.chars[ruby_start..self.pos].iter().collect();
-
-        // 》 をスキップ
-        if self.pos < self.chars.len() && self.chars[self.pos] == RUBY_END {
-            self.pos += 1;
-        }
+        self.advance_until(RUBY_END);
+        let ruby_content = self.slice_from(ruby_start);
+        self.skip_if(RUBY_END);
 
         // 親文字とルビを再帰的にトークナイズ
-        let mut base_tokenizer = Tokenizer::new(&base_content);
-        let base_children = base_tokenizer.tokenize();
-
-        let mut ruby_tokenizer = Tokenizer::new(&ruby_content);
-        let ruby_children = ruby_tokenizer.tokenize();
+        let base_children = Tokenizer::new(&base_content).tokenize();
+        let ruby_children = Tokenizer::new(&ruby_content).tokenize();
 
         Token::PrefixedRuby {
             base_children,
@@ -221,31 +169,12 @@ impl Tokenizer {
 
     /// 外字トークンを読む ※［＃...］
     fn read_gaiji(&mut self) -> Token {
-        // ※［＃ をスキップ
-        self.pos += 3;
+        self.skip(3); // ※［＃
         let start = self.pos;
-        let mut depth = 1;
 
-        while self.pos < self.chars.len() && depth > 0 {
-            let ch = self.chars[self.pos];
-
-            if ch == COMMAND_BEGIN {
-                depth += 1;
-            } else if ch == COMMAND_END {
-                depth -= 1;
-            }
-
-            if depth > 0 {
-                self.pos += 1;
-            }
-        }
-
-        let description: String = self.chars[start..self.pos].iter().collect();
-
-        // ］ をスキップ
-        if self.pos < self.chars.len() && self.chars[self.pos] == COMMAND_END {
-            self.pos += 1;
-        }
+        self.advance_until_balanced(COMMAND_BEGIN, COMMAND_END);
+        let description = self.slice_from(start);
+        self.skip_if(COMMAND_END);
 
         Token::Gaiji { description }
     }
@@ -254,43 +183,87 @@ impl Tokenizer {
     /// アクセント記号がなければNone（テキストとして扱う）
     fn try_read_accent(&mut self) -> Option<Token> {
         let start = self.pos;
-
-        // 〔 をスキップ
-        self.pos += 1;
+        self.skip(1); // 〔
         let content_start = self.pos;
 
-        // 〕 を探す
-        while self.pos < self.chars.len() && self.chars[self.pos] != ACCENT_END {
-            self.pos += 1;
-        }
-
-        // 〕 が見つからなかった場合
-        if self.pos >= self.chars.len() {
+        // 〕 が見つからない、またはアクセント記号がなければ巻き戻し
+        if !self.advance_until(ACCENT_END) {
             self.pos = start;
             return None;
         }
 
-        let content: String = self.chars[content_start..self.pos].iter().collect();
+        let content = self.slice_from(content_start);
 
-        // アクセント記号を含むか判定
         if !Self::contains_accent_marks(&content) {
             self.pos = start;
             return None;
         }
 
-        // 〕 をスキップ
-        self.pos += 1;
+        self.skip(1); // 〕
 
-        // 内容を再帰的にトークナイズ
-        let mut inner_tokenizer = Tokenizer::new(&content);
-        let children = inner_tokenizer.tokenize();
-
+        let children = Tokenizer::new(&content).tokenize();
         Some(Token::Accent { children })
     }
 
     /// 文字列がアクセント記号を含むか判定
     fn contains_accent_marks(s: &str) -> bool {
         s.chars().any(|c| ACCENT_MARKS.contains(&c))
+    }
+
+    // --- カーソル操作ヘルパー ---
+
+    /// 現在位置から n 文字先を覗く
+    fn peek_nth(&self, n: usize) -> Option<char> {
+        self.chars.get(self.pos + n).copied()
+    }
+
+    /// 現在の文字を取得
+    fn current_char(&self) -> Option<char> {
+        self.chars.get(self.pos).copied()
+    }
+
+    /// n 文字スキップ
+    fn skip(&mut self, n: usize) {
+        self.pos += n;
+    }
+
+    /// 特定の文字までスキップ（見つかったらtrue）
+    fn advance_until(&mut self, target: char) -> bool {
+        while self.pos < self.chars.len() {
+            if self.chars[self.pos] == target {
+                return true;
+            }
+            self.pos += 1;
+        }
+        false
+    }
+
+    /// ネストを考慮して閉じ括弧まで進む（閉じ括弧の手前で停止）
+    fn advance_until_balanced(&mut self, open: char, close: char) {
+        let mut depth = 1;
+        while self.pos < self.chars.len() && depth > 0 {
+            let ch = self.chars[self.pos];
+            if ch == open {
+                depth += 1;
+            } else if ch == close {
+                depth -= 1;
+            }
+            if depth > 0 {
+                self.pos += 1;
+            }
+        }
+    }
+
+    /// 現在の文字が target なら1文字スキップ
+    fn skip_if(&mut self, target: char) {
+        if self.current_char() == Some(target) {
+            self.pos += 1;
+        }
+    }
+
+    /// start から現在位置までを文字列として取得
+    fn slice_from(&self, start: usize) -> String {
+        self.chars[start..self.pos].iter().collect()
     }
 }
 
