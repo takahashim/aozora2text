@@ -1,10 +1,14 @@
 # aozora2text
 
 [![CI](https://github.com/takahashim/aozora2text/actions/workflows/ci.yml/badge.svg)](https://github.com/takahashim/aozora2text/actions/workflows/ci.yml)
+[![crates.io](https://img.shields.io/crates/v/aozora2text.svg)](https://crates.io/crates/aozora2text)
 
 青空文庫形式のテキスト本文をプレーンテキストに変換するCLIツールです。
 
 元テキストがShift_JISでもUTF-8でも、UTF-8として出力します。
+
+[In English](./README.en.md)
+
 
 ## 機能
 
@@ -21,7 +25,7 @@
 ## インストール
 
 ```bash
-cargo install --path .
+cargo install aozora2text
 ```
 
 ## 使い方
