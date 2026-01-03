@@ -116,7 +116,7 @@ impl Tokenizer {
         self.skip(2); // ［＃
         let start = self.pos;
 
-        self.advance_until_balanced(COMMAND_BEGIN, COMMAND_END);
+        self.skip_until_balanced(COMMAND_BEGIN, COMMAND_END);
         let content = self.slice_from(start);
         self.skip_if(COMMAND_END);
 
@@ -128,7 +128,7 @@ impl Tokenizer {
         self.skip(1); // 《
         let start = self.pos;
 
-        self.advance_until(RUBY_END);
+        self.skip_until(RUBY_END);
         let content = self.slice_from(start);
         self.skip_if(RUBY_END);
 
@@ -144,7 +144,7 @@ impl Tokenizer {
         let base_start = self.pos;
 
         // 《 が見つからなければ ｜ をテキストとして返す
-        if !self.advance_until(RUBY_BEGIN) {
+        if !self.skip_until(RUBY_BEGIN) {
             self.pos = base_start;
             return Token::Text(RUBY_PREFIX.to_string());
         }
@@ -153,7 +153,7 @@ impl Tokenizer {
         self.skip(1); // 《
         let ruby_start = self.pos;
 
-        self.advance_until(RUBY_END);
+        self.skip_until(RUBY_END);
         let ruby_content = self.slice_from(ruby_start);
         self.skip_if(RUBY_END);
 
@@ -172,7 +172,7 @@ impl Tokenizer {
         self.skip(3); // ※［＃
         let start = self.pos;
 
-        self.advance_until_balanced(COMMAND_BEGIN, COMMAND_END);
+        self.skip_until_balanced(COMMAND_BEGIN, COMMAND_END);
         let description = self.slice_from(start);
         self.skip_if(COMMAND_END);
 
@@ -187,7 +187,7 @@ impl Tokenizer {
         let content_start = self.pos;
 
         // 〕 が見つからない、またはアクセント記号がなければ巻き戻し
-        if !self.advance_until(ACCENT_END) {
+        if !self.skip_until(ACCENT_END) {
             self.pos = start;
             return None;
         }
@@ -233,7 +233,7 @@ impl Tokenizer {
     }
 
     /// 特定の文字までスキップ（見つかったらtrue）
-    fn advance_until(&mut self, target: char) -> bool {
+    fn skip_until(&mut self, target: char) -> bool {
         while self.pos < self.chars.len() {
             if self.chars[self.pos] == target {
                 return true;
@@ -243,8 +243,8 @@ impl Tokenizer {
         false
     }
 
-    /// ネストを考慮して閉じ括弧まで進む（閉じ括弧の手前で停止）
-    fn advance_until_balanced(&mut self, open: char, close: char) {
+    /// ネストを考慮して閉じ括弧までスキップ（閉じ括弧の手前で停止）
+    fn skip_until_balanced(&mut self, open: char, close: char) {
         let mut depth = 1;
         while self.pos < self.chars.len() && depth > 0 {
             let ch = self.chars[self.pos];
