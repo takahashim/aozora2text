@@ -23,9 +23,7 @@ fn main() {
                         .chars()
                         .map(|c| format!("\\u{{{:04X}}}", c as u32))
                         .collect();
-                    code.push_str(&format!(
-                        "    m.insert(\"{key}\", \"{escaped}\");\n"
-                    ));
+                    code.push_str(&format!("    m.insert(\"{key}\", \"{escaped}\");\n"));
                 }
             }
         }

@@ -91,7 +91,7 @@ mod tests {
             "底本：青空文庫",
         ];
         let body = extract_body_lines(&lines);
-        assert_eq!(body, vec!["本文1行目", "本文2行目",""]);
+        assert_eq!(body, vec!["本文1行目", "本文2行目", ""]);
     }
 
     #[test]
@@ -153,7 +153,7 @@ mod tests {
             "---",
             "本文",
             "底本：青空文庫",
-            ];
+        ];
         let body = extract_body_lines(&lines);
         assert_eq!(body, vec!["本文"]);
     }

@@ -117,12 +117,7 @@ fn extract_jis_code(description: &str) -> Option<String> {
 fn normalize_jis_code(code: &str) -> String {
     let parts: Vec<&str> = code.split('-').collect();
     if parts.len() == 3 {
-        format!(
-            "{}-{:0>2}-{:0>2}",
-            parts[0],
-            parts[1],
-            parts[2]
-        )
+        format!("{}-{:0>2}-{:0>2}", parts[0], parts[1], parts[2])
     } else {
         code.to_string()
     }
@@ -141,8 +136,14 @@ mod tests {
 
     #[test]
     fn test_extract_jis_code() {
-        assert_eq!(extract_jis_code("「二の字点」、1-2-22"), Some("1-2-22".to_string()));
-        assert_eq!(extract_jis_code("「文字」、2-14-75"), Some("2-14-75".to_string()));
+        assert_eq!(
+            extract_jis_code("「二の字点」、1-2-22"),
+            Some("1-2-22".to_string())
+        );
+        assert_eq!(
+            extract_jis_code("「文字」、2-14-75"),
+            Some("2-14-75".to_string())
+        );
         assert_eq!(extract_jis_code("テスト"), None);
     }
 

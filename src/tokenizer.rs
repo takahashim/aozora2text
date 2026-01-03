@@ -54,9 +54,7 @@ impl Tokenizer {
 
                 // 外字 ※［＃...］
                 GAIJI_MARK => {
-                    if self.peek_nth(1) == Some(COMMAND_BEGIN)
-                        && self.peek_nth(2) == Some(IGETA)
-                    {
+                    if self.peek_nth(1) == Some(COMMAND_BEGIN) && self.peek_nth(2) == Some(IGETA) {
                         tokens.push(self.read_gaiji());
                     } else {
                         // ※ だけならテキスト
@@ -428,7 +426,9 @@ mod tests {
     #[test]
     fn test_multiple_tokens() {
         // 複数のトークンが連続するケース
-        let mut tokenizer = Tokenizer::new("吾輩《わがはい》は※［＃「米印」、U+203B］猫である［＃「である」に傍点］");
+        let mut tokenizer = Tokenizer::new(
+            "吾輩《わがはい》は※［＃「米印」、U+203B］猫である［＃「である」に傍点］",
+        );
         let tokens = tokenizer.tokenize();
         assert_eq!(
             tokens,

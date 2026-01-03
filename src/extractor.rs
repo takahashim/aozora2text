@@ -59,7 +59,10 @@ mod tests {
 
     #[test]
     fn test_command_removed() {
-        assert_eq!(tokenize_and_extract("猫である［＃「である」に傍点］"), "猫である");
+        assert_eq!(
+            tokenize_and_extract("猫である［＃「である」に傍点］"),
+            "猫である"
+        );
     }
 
     #[test]
