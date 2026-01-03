@@ -1,12 +1,6 @@
 //! 外字（JIS外文字）の変換
 
-use once_cell::sync::Lazy;
-use std::collections::HashMap;
-
-/// JISコード→Unicode変換テーブル（コンパイル時埋め込み）
-/// 値は &str（複数文字の合成文字に対応、例: カ゚ = カ + 半濁点）
-static JIS2UCS: Lazy<HashMap<&'static str, &'static str>> =
-    Lazy::new(|| include!(concat!(env!("OUT_DIR"), "/jis2ucs_table.rs")));
+use crate::jis_table::{jis_to_unicode, normalize_jis_code};
 
 /// 外字説明からUnicode文字列に変換
 ///
@@ -18,7 +12,7 @@ static JIS2UCS: Lazy<HashMap<&'static str, &'static str>> =
 /// # Examples
 ///
 /// ```
-/// use aozora2text::gaiji::convert_gaiji;
+/// use aozora_core::gaiji::convert_gaiji;
 ///
 /// assert_eq!(convert_gaiji("「丸印」、U+25CB"), "○");
 /// ```
@@ -30,14 +24,59 @@ pub fn convert_gaiji(description: &str) -> String {
 
     // 2. JISコードを探す
     if let Some(jis_code) = extract_jis_code(description) {
-        let normalized = normalize_jis_code(&jis_code);
-        if let Some(&s) = JIS2UCS.get(normalized.as_str()) {
-            return s.to_string();
+        if let Some(unicode) = jis_to_unicode(&jis_code) {
+            return unicode;
         }
     }
 
     // 3. 変換不能
     "〓".to_string()
+}
+
+/// 外字変換の結果
+#[derive(Debug, Clone, PartialEq)]
+pub enum GaijiResult {
+    /// Unicode文字に変換成功
+    Unicode(String),
+    /// JISコードからUnicodeに変換成功
+    JisConverted {
+        /// JISコード
+        jis_code: String,
+        /// 変換後のUnicode文字列
+        unicode: String,
+    },
+    /// JISコードはあるが画像が必要
+    JisImage {
+        /// JISコード
+        jis_code: String,
+    },
+    /// 変換不能
+    Unconvertible,
+}
+
+/// 外字説明を解析して結果を返す（HTML変換用）
+pub fn parse_gaiji(description: &str) -> GaijiResult {
+    // 1. Unicode直接指定を探す
+    if let Some(unicode_char) = extract_unicode(description) {
+        return GaijiResult::Unicode(unicode_char.to_string());
+    }
+
+    // 2. JISコードを探す
+    if let Some(jis_code) = extract_jis_code(description) {
+        let normalized = normalize_jis_code(&jis_code);
+        if let Some(unicode) = jis_to_unicode(&normalized) {
+            return GaijiResult::JisConverted {
+                jis_code: normalized,
+                unicode,
+            };
+        }
+        return GaijiResult::JisImage {
+            jis_code: normalized,
+        };
+    }
+
+    // 3. 変換不能
+    GaijiResult::Unconvertible
 }
 
 /// "U+XXXX" パターンからUnicode文字を抽出
@@ -112,23 +151,6 @@ fn extract_jis_code(description: &str) -> Option<String> {
     None
 }
 
-/// JISコードを正規化（区・点を2桁ゼロ埋め）
-/// 例: "1-2-22" → "1-02-22"
-fn normalize_jis_code(code: &str) -> String {
-    let parts: Vec<&str> = code.split('-').collect();
-    if parts.len() == 3 {
-        format!("{}-{:0>2}-{:0>2}", parts[0], parts[1], parts[2])
-    } else {
-        code.to_string()
-    }
-}
-
-/// JISコードからUnicode文字列に変換
-pub fn jis_to_unicode(jis_code: &str) -> Option<String> {
-    let normalized = normalize_jis_code(jis_code);
-    JIS2UCS.get(normalized.as_str()).map(|&s| s.to_string())
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -151,13 +173,6 @@ mod tests {
             Some("2-14-75".to_string())
         );
         assert_eq!(extract_jis_code("テスト"), None);
-    }
-
-    #[test]
-    fn test_normalize_jis_code() {
-        assert_eq!(normalize_jis_code("1-2-22"), "1-02-22");
-        assert_eq!(normalize_jis_code("2-14-75"), "2-14-75");
-        assert_eq!(normalize_jis_code("1-1-1"), "1-01-01");
     }
 
     #[test]
@@ -187,5 +202,24 @@ mod tests {
     #[test]
     fn test_convert_gaiji_with_full_description() {
         assert_eq!(convert_gaiji("半濁点付き片仮名カ、1-05-87"), "カ゚");
+    }
+
+    #[test]
+    fn test_parse_gaiji_unicode() {
+        assert_eq!(
+            parse_gaiji("「丸印」、U+25CB"),
+            GaijiResult::Unicode("○".to_string())
+        );
+    }
+
+    #[test]
+    fn test_parse_gaiji_jis() {
+        match parse_gaiji("1-05-87") {
+            GaijiResult::JisConverted { jis_code, unicode } => {
+                assert_eq!(jis_code, "1-05-87");
+                assert_eq!(unicode, "カ゚");
+            }
+            _ => panic!("Expected JisConverted"),
+        }
     }
 }

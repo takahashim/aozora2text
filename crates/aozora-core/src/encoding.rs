@@ -12,7 +12,7 @@ use encoding_rs::SHIFT_JIS;
 /// # Examples
 ///
 /// ```
-/// use aozora2text::encoding::decode_to_utf8;
+/// use aozora_core::encoding::decode_to_utf8;
 ///
 /// let utf8_bytes = "こんにちは".as_bytes();
 /// assert_eq!(decode_to_utf8(utf8_bytes), "こんにちは");

@@ -3,10 +3,8 @@
 use once_cell::sync::Lazy;
 use std::collections::HashMap;
 
-use crate::gaiji::jis_to_unicode;
-
-/// アクセント記号一覧
-const ACCENT_MARKS: &[char] = &['\'', '`', '^', '~', ':', '&', '_', ',', '/', '@'];
+use crate::delimiters::ACCENT_MARKS;
+use crate::jis_table::jis_to_unicode;
 
 /// アクセントテーブル（基底文字+記号 → JISコード）
 static ACCENT_TABLE: Lazy<HashMap<&'static str, &'static str>> =
@@ -20,7 +18,7 @@ static ACCENT_TABLE: Lazy<HashMap<&'static str, &'static str>> =
 /// # Examples
 ///
 /// ```
-/// use aozora2text::accent::convert_accent;
+/// use aozora_core::accent::convert_accent;
 ///
 /// assert_eq!(convert_accent("cafe'"), "café");
 /// assert_eq!(convert_accent("A'"), "Á");
@@ -60,7 +58,7 @@ pub fn convert_accent(input: &str) -> String {
 }
 
 /// 文字がアクセント記号かどうか
-fn is_accent_mark(c: char) -> bool {
+pub fn is_accent_mark(c: char) -> bool {
     ACCENT_MARKS.contains(&c)
 }
 
@@ -110,5 +108,14 @@ mod tests {
     fn test_unknown_combination() {
         // 未知の組み合わせはそのまま
         assert_eq!(convert_accent("z'"), "z'");
+    }
+
+    #[test]
+    fn test_is_accent_mark() {
+        assert!(is_accent_mark('\''));
+        assert!(is_accent_mark('`'));
+        assert!(is_accent_mark('^'));
+        assert!(!is_accent_mark('a'));
+        assert!(!is_accent_mark('1'));
     }
 }

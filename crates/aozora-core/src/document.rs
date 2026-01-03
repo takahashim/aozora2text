@@ -1,5 +1,18 @@
 //! 文書構造の処理
 
+/// 文書セクションの種類
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum SectionType {
+    /// ヘッダー（タイトル、著者名など）
+    Header,
+    /// ヘッダー直後の空行後
+    AfterHeader,
+    /// 注記セクション（---で囲まれた部分）
+    Chuuki,
+    /// 本文
+    Body,
+}
+
 /// 文書から本文行を抽出
 ///
 /// # 文書構造
@@ -11,7 +24,7 @@
 /// # Examples
 ///
 /// ```
-/// use aozora2text::document::extract_body_lines;
+/// use aozora_core::document::extract_body_lines;
 ///
 /// let lines = vec![
 ///     "タイトル", "著者", "",
@@ -23,20 +36,20 @@
 /// ```
 pub fn extract_body_lines<'a>(lines: &[&'a str]) -> Vec<&'a str> {
     let mut result = Vec::new();
-    let mut section = Section::Header;
+    let mut section = SectionType::Header;
 
     for line in lines {
         match section {
-            Section::Header => {
+            SectionType::Header => {
                 // 空行でヘッダー終了
                 if line.is_empty() {
-                    section = Section::AfterHeader;
+                    section = SectionType::AfterHeader;
                 }
             }
-            Section::AfterHeader => {
+            SectionType::AfterHeader => {
                 // 空行後、---で始まれば注記セクション、そうでなければ本文
                 if line.starts_with("---") {
-                    section = Section::Chuuki;
+                    section = SectionType::Chuuki;
                 } else if line.is_empty() {
                     // 連続する空行はスキップ
                 } else {
@@ -45,16 +58,16 @@ pub fn extract_body_lines<'a>(lines: &[&'a str]) -> Vec<&'a str> {
                         break;
                     }
                     result.push(*line);
-                    section = Section::Body;
+                    section = SectionType::Body;
                 }
             }
-            Section::Chuuki => {
+            SectionType::Chuuki => {
                 // ---で注記セクション終了
                 if line.starts_with("---") {
-                    section = Section::Body;
+                    section = SectionType::Body;
                 }
             }
-            Section::Body => {
+            SectionType::Body => {
                 // 底本：で本文終了
                 if line.starts_with("底本：") {
                     break;
@@ -65,14 +78,6 @@ pub fn extract_body_lines<'a>(lines: &[&'a str]) -> Vec<&'a str> {
     }
 
     result
-}
-
-#[derive(Clone, Copy)]
-enum Section {
-    Header,
-    AfterHeader,
-    Chuuki,
-    Body,
 }
 
 #[cfg(test)]

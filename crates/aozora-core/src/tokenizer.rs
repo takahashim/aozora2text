@@ -1,10 +1,7 @@
 //! 青空文庫形式の字句解析（トークナイザ）
 
-use crate::token::delimiters::*;
+use crate::delimiters::*;
 use crate::token::Token;
-
-/// アクセント記号一覧
-const ACCENT_MARKS: &[char] = &['\'', '`', '^', '~', ':', '&', '_', ',', '/', '@'];
 
 /// 1行をトークン列に変換するトークナイザ
 pub struct Tokenizer {
@@ -270,21 +267,24 @@ impl Tokenizer {
     }
 }
 
+/// 文字列をトークン列に変換するユーティリティ関数
+pub fn tokenize(input: &str) -> Vec<Token> {
+    Tokenizer::new(input).tokenize()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
 
     #[test]
     fn test_plain_text() {
-        let mut tokenizer = Tokenizer::new("こんにちは");
-        let tokens = tokenizer.tokenize();
+        let tokens = tokenize("こんにちは");
         assert_eq!(tokens, vec![Token::Text("こんにちは".to_string())]);
     }
 
     #[test]
     fn test_ruby() {
-        let mut tokenizer = Tokenizer::new("漢字《かんじ》");
-        let tokens = tokenizer.tokenize();
+        let tokens = tokenize("漢字《かんじ》");
         assert_eq!(
             tokens,
             vec![
@@ -298,8 +298,7 @@ mod tests {
 
     #[test]
     fn test_prefixed_ruby() {
-        let mut tokenizer = Tokenizer::new("｜東京《とうきょう》");
-        let tokens = tokenizer.tokenize();
+        let tokens = tokenize("｜東京《とうきょう》");
         assert_eq!(
             tokens,
             vec![Token::PrefixedRuby {
@@ -311,8 +310,7 @@ mod tests {
 
     #[test]
     fn test_command() {
-        let mut tokenizer = Tokenizer::new("猫である［＃「である」に傍点］");
-        let tokens = tokenizer.tokenize();
+        let tokens = tokenize("猫である［＃「である」に傍点］");
         assert_eq!(
             tokens,
             vec![
@@ -326,8 +324,7 @@ mod tests {
 
     #[test]
     fn test_gaiji() {
-        let mut tokenizer = Tokenizer::new("※［＃「丸印」、U+25CB］");
-        let tokens = tokenizer.tokenize();
+        let tokens = tokenize("※［＃「丸印」、U+25CB］");
         assert_eq!(
             tokens,
             vec![Token::Gaiji {
@@ -338,8 +335,7 @@ mod tests {
 
     #[test]
     fn test_gaiji_mark_alone() {
-        let mut tokenizer = Tokenizer::new("※普通の文");
-        let tokens = tokenizer.tokenize();
+        let tokens = tokenize("※普通の文");
         assert_eq!(
             tokens,
             vec![
@@ -351,10 +347,7 @@ mod tests {
 
     #[test]
     fn test_bracket_without_igeta() {
-        // ［の後に＃がないのでコマンドではない
-        // ］は単独ではデリミタではないのでテキストの一部になる
-        let mut tokenizer = Tokenizer::new("［テスト］");
-        let tokens = tokenizer.tokenize();
+        let tokens = tokenize("［テスト］");
         assert_eq!(
             tokens,
             vec![
@@ -366,8 +359,7 @@ mod tests {
 
     #[test]
     fn test_nested_command() {
-        let mut tokenizer = Tokenizer::new("［＃ここから罫囲み［＃「罫囲み」に傍点］］");
-        let tokens = tokenizer.tokenize();
+        let tokens = tokenize("［＃ここから罫囲み［＃「罫囲み」に傍点］］");
         assert_eq!(
             tokens,
             vec![Token::Command {
@@ -378,8 +370,7 @@ mod tests {
 
     #[test]
     fn test_accent() {
-        let mut tokenizer = Tokenizer::new("〔E'difice〕");
-        let tokens = tokenizer.tokenize();
+        let tokens = tokenize("〔E'difice〕");
         assert_eq!(
             tokens,
             vec![Token::Accent {
@@ -390,9 +381,7 @@ mod tests {
 
     #[test]
     fn test_accent_no_mark() {
-        // アクセント記号がなければテキスト扱い
-        let mut tokenizer = Tokenizer::new("〔参考〕");
-        let tokens = tokenizer.tokenize();
+        let tokens = tokenize("〔参考〕");
         assert_eq!(
             tokens,
             vec![
@@ -404,9 +393,7 @@ mod tests {
 
     #[test]
     fn test_prefixed_ruby_without_ruby() {
-        // ｜の後に《》がなければテキスト扱い
-        let mut tokenizer = Tokenizer::new("｜だけ");
-        let tokens = tokenizer.tokenize();
+        let tokens = tokenize("｜だけ");
         assert_eq!(
             tokens,
             vec![
@@ -418,18 +405,14 @@ mod tests {
 
     #[test]
     fn test_empty_input() {
-        let mut tokenizer = Tokenizer::new("");
-        let tokens = tokenizer.tokenize();
+        let tokens = tokenize("");
         assert_eq!(tokens, vec![]);
     }
 
     #[test]
     fn test_multiple_tokens() {
-        // 複数のトークンが連続するケース
-        let mut tokenizer = Tokenizer::new(
-            "吾輩《わがはい》は※［＃「米印」、U+203B］猫である［＃「である」に傍点］",
-        );
-        let tokens = tokenizer.tokenize();
+        let tokens =
+            tokenize("吾輩《わがはい》は※［＃「米印」、U+203B］猫である［＃「である」に傍点］");
         assert_eq!(
             tokens,
             vec![
