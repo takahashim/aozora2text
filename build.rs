@@ -24,8 +24,7 @@ fn main() {
                         .map(|c| format!("\\u{{{:04X}}}", c as u32))
                         .collect();
                     code.push_str(&format!(
-                        "    m.insert(\"{}\", \"{}\");\n",
-                        key, escaped
+                        "    m.insert(\"{key}\", \"{escaped}\");\n"
                     ));
                 }
             }

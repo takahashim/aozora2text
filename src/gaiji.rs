@@ -76,7 +76,7 @@ fn extract_jis_code(description: &str) -> Option<String> {
             result.push(c);
 
             // 続く数字を読む
-            while chars.peek().map_or(false, |c| c.is_ascii_digit()) {
+            while chars.peek().is_some_and(|c| c.is_ascii_digit()) {
                 result.push(chars.next().unwrap());
             }
 
@@ -85,7 +85,7 @@ fn extract_jis_code(description: &str) -> Option<String> {
                 result.push(chars.next().unwrap());
 
                 // 2番目の数字
-                while chars.peek().map_or(false, |c| c.is_ascii_digit()) {
+                while chars.peek().is_some_and(|c| c.is_ascii_digit()) {
                     result.push(chars.next().unwrap());
                 }
 
@@ -94,7 +94,7 @@ fn extract_jis_code(description: &str) -> Option<String> {
                     result.push(chars.next().unwrap());
 
                     // 3番目の数字
-                    while chars.peek().map_or(false, |c| c.is_ascii_digit()) {
+                    while chars.peek().is_some_and(|c| c.is_ascii_digit()) {
                         result.push(chars.next().unwrap());
                     }
 

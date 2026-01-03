@@ -82,7 +82,7 @@ fn read_first_txt_from_zip(path: &Path) -> io::Result<Vec<u8>> {
     let mut archive = zip::ZipArchive::new(file).map_err(|e| {
         io::Error::new(
             io::ErrorKind::InvalidData,
-            format!("failed to read ZIP archive: {}", e),
+            format!("failed to read ZIP archive: {e}"),
         )
     })?;
 
