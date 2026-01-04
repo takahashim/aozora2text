@@ -12,8 +12,8 @@ license = "MIT"
 repository = "https://github.com/takahashim/aozora2"
 
 [workspace.dependencies]
-aozora-core = { path = "crates/aozora-core", version = "0.7.0" }
-aozora2 = { path = "crates/aozora2", version = "0.1.0" }
+aozora-core = { path = "crates/aozora-core", version = "0.7.1" }
+aozora2 = { path = "crates/aozora2", version = "0.2.0" }
 clap = { version = "4", features = ["derive"] }
 encoding_rs = "0.8"
 flate2 = "1"
