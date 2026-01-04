@@ -161,18 +161,18 @@ fn accent_name(key: &str) -> String {
             '\'' => "アキュートアクセント",
             '`' => "グレーブアクセント",
             '^' => "サーカムフレックスアクセント",
-            ':' => "ウムラウト",
+            ':' => "ダイエレシス",
             '~' => "チルダ",
             '_' => "マクロン",
             ',' => "セディラ",
             _ => "アクセント",
         };
-        let case = if base.is_uppercase() {
-            "大文字"
+        // 小文字のみ「小文字」サフィックス付き
+        if base.is_lowercase() {
+            format!("{}付き{}小文字", mark_name, base.to_uppercase())
         } else {
-            "小文字"
-        };
-        format!("{}付き{}{}", mark_name, base.to_uppercase(), case)
+            format!("{}付き{}", mark_name, base)
+        }
     } else if chars.len() == 3 {
         // リガチャ
         let upper = key.starts_with(|c: char| c.is_uppercase());

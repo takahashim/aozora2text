@@ -2,11 +2,17 @@
 //!
 //! トークンからASTノードへの変換を行います。
 
+mod block_parser;
 pub mod command_parser;
+mod content_parser;
+mod reference_parser;
 pub mod reference_resolver;
 pub mod ruby_parser;
+mod utils;
 
-use crate::node::{BlockParams, BlockType, MidashiLevel, MidashiStyle, Node, RubyDirection};
+use crate::node::{
+    BlockParams, BlockType, FontSizeType, MidashiLevel, MidashiStyle, Node, RubyDirection,
+};
 use crate::token::Token;
 
 pub use command_parser::{parse_command, CommandResult};
@@ -28,8 +34,8 @@ pub use ruby_parser::extract_ruby_base;
 pub fn parse(tokens: &[Token]) -> Vec<Node> {
     let mut nodes = Vec::new();
 
-    for token in tokens {
-        let parsed = parse_token(token);
+    for (i, token) in tokens.iter().enumerate() {
+        let parsed = parse_token_with_context(token, &nodes, tokens, i);
         nodes.extend(parsed);
     }
 
@@ -37,6 +43,48 @@ pub fn parse(tokens: &[Token]) -> Vec<Node> {
     resolve_references(&mut nodes);
 
     nodes
+}
+
+/// 直前のノードがテキストで `（` で終わるかチェック
+fn has_open_paren_before(nodes: &[Node]) -> bool {
+    nodes.last().map_or(false, |node| {
+        if let Node::Text(s) = node {
+            s.ends_with('（')
+        } else {
+            false
+        }
+    })
+}
+
+/// 直後のトークンがテキストで `）` で始まるかチェック
+fn has_close_paren_after(tokens: &[Token], current_index: usize) -> bool {
+    tokens.get(current_index + 1).map_or(false, |token| {
+        if let Token::Text(s) = token {
+            s.starts_with('）')
+        } else {
+            false
+        }
+    })
+}
+
+/// コンテキスト付きでトークンをパース
+fn parse_token_with_context(
+    token: &Token,
+    nodes: &[Node],
+    tokens: &[Token],
+    current_index: usize,
+) -> Vec<Node> {
+    match token {
+        Token::Command { content } => {
+            vec![parse_command_to_node_with_context(
+                content,
+                nodes,
+                tokens,
+                current_index,
+            )]
+        }
+        _ => parse_token(token),
+    }
 }
 
 /// 単一のトークンをノード（複数可）に変換
@@ -145,9 +193,30 @@ fn parse_command_to_node(content: &str) -> Node {
             }
         }
 
+        CommandResult::FontSize {
+            target,
+            size_type,
+            level,
+        } => {
+            // 後方参照フォントサイズ: 「対象」はN段階大きな/小さな文字
+            // specにはサイズ情報を含める
+            let spec = match size_type {
+                FontSizeType::Dai => format!("{level}段階大きな文字"),
+                FontSizeType::Sho => format!("{level}段階小さな文字"),
+            };
+            Node::UnresolvedReference {
+                target,
+                spec,
+                connector: "は".to_string(),
+            }
+        }
+
         CommandResult::BlockStart { block_type, params } => Node::BlockStart { block_type, params },
 
-        CommandResult::BlockEnd { block_type } => Node::BlockEnd { block_type },
+        CommandResult::BlockEnd { block_type } => Node::BlockEnd {
+            block_type,
+            params: BlockParams::default(),
+        },
 
         CommandResult::LineIndent { width } => Node::BlockStart {
             block_type: BlockType::Jisage,
@@ -191,6 +260,7 @@ fn parse_command_to_node(content: &str) -> Node {
 
         CommandResult::TcyEnd => Node::BlockEnd {
             block_type: BlockType::Tcy,
+            params: BlockParams::default(),
         },
 
         CommandResult::WarigakiStart => Node::BlockStart {
@@ -200,15 +270,142 @@ fn parse_command_to_node(content: &str) -> Node {
 
         CommandResult::WarigakiEnd => Node::BlockEnd {
             block_type: BlockType::Warigaki,
+            params: BlockParams::default(),
         },
 
-        CommandResult::LeftRuby { target, ruby } => Node::Ruby {
-            children: vec![Node::text(&target)],
-            ruby: vec![Node::text(&ruby)],
-            direction: RubyDirection::Left,
+        CommandResult::LeftRuby { target, ruby } => {
+            // Ruby版と同様、左ルビは注記として出力（未実装機能）
+            Node::Note(format!("「{target}」の左に「{ruby}」のルビ"))
+        }
+
+        CommandResult::AnnotationRuby { target, annotation } => {
+            // 注記ルビ: 「対象」に「注記」の注記 → 後方参照として解決
+            Node::UnresolvedReference {
+                target,
+                spec: format!("annotation_ruby:{}", annotation),
+                connector: "に".to_string(),
+            }
+        }
+
+        CommandResult::InlineTcy { target } => Node::UnresolvedReference {
+            target,
+            spec: "縦中横".to_string(),
+            connector: "は".to_string(),
         },
+
+        CommandResult::InlineKeigakomi { target } => Node::UnresolvedReference {
+            target,
+            spec: "罫囲み".to_string(),
+            connector: "は".to_string(),
+        },
+
+        CommandResult::InlineYokogumi { target } => Node::UnresolvedReference {
+            target,
+            spec: "横組み".to_string(),
+            connector: "は".to_string(),
+        },
+
+        CommandResult::InlineCaption { target } => Node::UnresolvedReference {
+            target,
+            spec: "キャプション".to_string(),
+            connector: "は".to_string(),
+        },
+
+        CommandResult::CaptionStart => Node::BlockStart {
+            block_type: BlockType::Caption,
+            params: BlockParams::default(),
+        },
+
+        CommandResult::CaptionEnd => Node::BlockEnd {
+            block_type: BlockType::Caption,
+            params: BlockParams::default(),
+        },
+
+        CommandResult::StyleStart { style_type } => Node::BlockStart {
+            block_type: BlockType::Style,
+            params: BlockParams {
+                style_type: Some(style_type),
+                ..Default::default()
+            },
+        },
+
+        CommandResult::StyleEnd { style_type } => Node::BlockEnd {
+            block_type: BlockType::Style,
+            params: BlockParams {
+                style_type: Some(style_type),
+                ..Default::default()
+            },
+        },
+
+        CommandResult::AnnotationRangeStart => Node::BlockStart {
+            block_type: BlockType::AnnotationRange,
+            params: BlockParams::default(),
+        },
+
+        CommandResult::LeftAnnotationRangeStart => Node::BlockStart {
+            block_type: BlockType::LeftAnnotationRange,
+            params: BlockParams::default(),
+        },
+
+        CommandResult::AnnotationRangeEnd { annotation } => Node::BlockEnd {
+            block_type: BlockType::AnnotationRange,
+            params: BlockParams {
+                annotation: Some(annotation),
+                ..Default::default()
+            },
+        },
+
+        CommandResult::LeftAnnotationRangeEnd { annotation } => Node::BlockEnd {
+            block_type: BlockType::LeftAnnotationRange,
+            params: BlockParams {
+                annotation: Some(annotation),
+                ..Default::default()
+            },
+        },
+
+        CommandResult::SideNote { target, annotation } => {
+            // 傍記: 「対象」に「注記」の傍記 → 後方参照として解決（ルビに変換）
+            Node::UnresolvedReference {
+                target,
+                spec: format!("side_note:{}", annotation),
+                connector: "に".to_string(),
+            }
+        }
 
         CommandResult::Unknown(text) => Node::Note(text),
+    }
+}
+
+/// コマンドをノードに変換（コンテキスト付き）
+fn parse_command_to_node_with_context(
+    content: &str,
+    nodes: &[Node],
+    tokens: &[Token],
+    current_index: usize,
+) -> Node {
+    use command_parser::CommandResult;
+
+    match parse_command(content) {
+        CommandResult::WarigakiStart => {
+            let mut params = BlockParams::default();
+            params.has_open_paren = has_open_paren_before(nodes);
+            Node::BlockStart {
+                block_type: BlockType::Warigaki,
+                params,
+            }
+        }
+
+        CommandResult::WarigakiEnd => {
+            let mut params = BlockParams::default();
+            params.has_close_paren = has_close_paren_after(tokens, current_index);
+            Node::BlockEnd {
+                block_type: BlockType::Warigaki,
+                params,
+            }
+        }
+
+        // その他のコマンドは通常の処理
+        _ => parse_command_to_node(content),
     }
 }
 
@@ -293,7 +490,8 @@ mod tests {
         assert!(matches!(
             &nodes[0],
             Node::BlockEnd {
-                block_type: BlockType::Jisage
+                block_type: BlockType::Jisage,
+                ..
             }
         ));
     }

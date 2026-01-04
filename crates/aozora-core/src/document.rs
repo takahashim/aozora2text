@@ -271,12 +271,36 @@ pub fn extract_body_lines<'a>(lines: &[&'a str]) -> Vec<&'a str> {
                 }
             }
             SectionType::Body => {
-                // 底本：で本文終了
-                if line.starts_with("底本：") {
+                // 底本：または［＃本文終わり］で本文終了
+                if line.starts_with("底本：") || *line == "［＃本文終わり］" {
                     break;
                 }
                 result.push(*line);
             }
+        }
+    }
+
+    result
+}
+
+/// 文書から本文終わり後のテキスト（after_text）を抽出
+///
+/// `［＃本文終わり］` から `底本：` までの行を抽出します。
+/// `［＃本文終わり］` がない場合は空のVecを返します。
+pub fn extract_after_text_lines<'a>(lines: &[&'a str]) -> Vec<&'a str> {
+    let mut result = Vec::new();
+    let mut in_after_text = false;
+
+    for line in lines {
+        if *line == "［＃本文終わり］" {
+            in_after_text = true;
+            continue; // ［＃本文終わり］自体は含めない
+        }
+        if in_after_text {
+            if line.starts_with("底本：") {
+                break;
+            }
+            result.push(*line);
         }
     }
 

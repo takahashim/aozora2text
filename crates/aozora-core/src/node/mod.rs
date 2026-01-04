@@ -94,6 +94,12 @@ pub enum Node {
         children: Vec<Node>,
     },
 
+    /// 横組み（インライン）
+    Yokogumi {
+        /// 内容のノード列
+        children: Vec<Node>,
+    },
+
     /// キャプション
     Caption {
         /// 内容のノード列
@@ -106,6 +112,16 @@ pub enum Node {
         upper: Vec<Node>,
         /// 下段のノード列
         lower: Vec<Node>,
+    },
+
+    /// フォントサイズ（大きな文字、小さな文字）
+    FontSize {
+        /// 内容のノード列
+        children: Vec<Node>,
+        /// サイズタイプ（大/小）
+        size_type: FontSizeType,
+        /// 段階レベル（1〜5）
+        level: u32,
     },
 
     /// 返り点
@@ -126,10 +142,23 @@ pub enum Node {
     BlockEnd {
         /// ブロックタイプ
         block_type: BlockType,
+        /// パラメータ（割り注用）
+        #[allow(dead_code)]
+        params: BlockParams,
     },
 
     /// 注記（編集者注）
     Note(String),
+
+    /// 注記付き範囲の終了マーカー（外字を含む可能性がある）
+    AnnotationEnd {
+        /// 前置テキスト（「左に「」など）
+        prefix: String,
+        /// 注記内容のノード列（外字を含む可能性あり）
+        content: Vec<Node>,
+        /// 後置テキスト（「」の注記付き終わり」など）
+        suffix: String,
+    },
 
     /// 未解決の前方参照
     UnresolvedReference {
@@ -158,6 +187,58 @@ pub enum RubyDirection {
     Left,
 }
 
+/// フォントサイズタイプ
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FontSizeType {
+    /// 大きな文字
+    Dai,
+    /// 小さな文字
+    Sho,
+}
+
+impl FontSizeType {
+    /// コマンド文字列からフォントサイズ情報を抽出
+    ///
+    /// 例: "１段階大きな文字" → Some((Dai, 1))
+    /// 例: "２段階小さな文字" → Some((Sho, 2))
+    pub fn from_command(command: &str) -> Option<(Self, u32)> {
+        // "N段階大きな文字" または "N段階小さな文字" を検出
+        if command.contains("大きな文字") {
+            let level = extract_level(command).unwrap_or(1);
+            return Some((FontSizeType::Dai, level));
+        }
+        if command.contains("小さな文字") {
+            let level = extract_level(command).unwrap_or(1);
+            return Some((FontSizeType::Sho, level));
+        }
+        None
+    }
+}
+
+/// コマンド文字列から段階レベルを抽出
+fn extract_level(command: &str) -> Option<u32> {
+    // "１段階" "２段階" などを検出
+    let chars: Vec<char> = command.chars().collect();
+    for (i, c) in chars.iter().enumerate() {
+        // 漢数字を数値に変換
+        let num = match c {
+            '１' | '1' => Some(1),
+            '２' | '2' => Some(2),
+            '３' | '3' => Some(3),
+            '４' | '4' => Some(4),
+            '５' | '5' => Some(5),
+            _ => None,
+        };
+        if let Some(n) = num {
+            // 次の文字が "段階" かチェック
+            if i + 2 < chars.len() && chars[i + 1] == '段' && chars[i + 2] == '階' {
+                return Some(n);
+            }
+        }
+    }
+    None
+}
+
 impl Node {
     /// テキストノードを作成
     pub fn text(s: impl Into<String>) -> Self {
@@ -180,15 +261,20 @@ impl Node {
             Node::Img { alt, .. } => alt.clone(),
             Node::Tcy { children } => children.iter().map(|n| n.to_text()).collect(),
             Node::Keigakomi { children } => children.iter().map(|n| n.to_text()).collect(),
+            Node::Yokogumi { children } => children.iter().map(|n| n.to_text()).collect(),
             Node::Caption { children } => children.iter().map(|n| n.to_text()).collect(),
             Node::Warigaki { upper, lower } => {
                 let u: String = upper.iter().map(|n| n.to_text()).collect();
                 let l: String = lower.iter().map(|n| n.to_text()).collect();
                 format!("{u}（{l}）")
             }
+            Node::FontSize { children, .. } => children.iter().map(|n| n.to_text()).collect(),
             Node::Kaeriten(s) => s.clone(),
             Node::Okurigana(s) => s.clone(),
-            Node::BlockStart { .. } | Node::BlockEnd { .. } | Node::Note(_) => String::new(),
+            Node::BlockStart { .. }
+            | Node::BlockEnd { .. }
+            | Node::Note(_)
+            | Node::AnnotationEnd { .. } => String::new(),
             Node::UnresolvedReference {
                 target,
                 spec,

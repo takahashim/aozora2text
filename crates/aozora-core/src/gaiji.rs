@@ -115,26 +115,38 @@ fn extract_jis_code(description: &str) -> Option<String> {
             result.push(c);
 
             // 続く数字を読む
-            while chars.peek().is_some_and(|c| c.is_ascii_digit()) {
-                result.push(chars.next().unwrap());
+            while let Some(&next) = chars.peek() {
+                if next.is_ascii_digit() {
+                    result.push(chars.next()?);
+                } else {
+                    break;
+                }
             }
 
             // ハイフンが続くか確認
             if chars.peek() == Some(&'-') {
-                result.push(chars.next().unwrap());
+                result.push(chars.next()?);
 
                 // 2番目の数字
-                while chars.peek().is_some_and(|c| c.is_ascii_digit()) {
-                    result.push(chars.next().unwrap());
+                while let Some(&next) = chars.peek() {
+                    if next.is_ascii_digit() {
+                        result.push(chars.next()?);
+                    } else {
+                        break;
+                    }
                 }
 
                 // 2番目のハイフン
                 if chars.peek() == Some(&'-') {
-                    result.push(chars.next().unwrap());
+                    result.push(chars.next()?);
 
                     // 3番目の数字
-                    while chars.peek().is_some_and(|c| c.is_ascii_digit()) {
-                        result.push(chars.next().unwrap());
+                    while let Some(&next) = chars.peek() {
+                        if next.is_ascii_digit() {
+                            result.push(chars.next()?);
+                        } else {
+                            break;
+                        }
                     }
 
                     // パターン "X-XX-XX" が完成

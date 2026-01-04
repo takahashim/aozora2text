@@ -125,6 +125,15 @@ pub fn extract_ruby_base_from_nodes(nodes: &[Node]) -> Option<(Vec<Node>, Vec<No
                     remaining_nodes.push(node.clone());
                 }
             }
+            Node::Accent { .. } => {
+                // アクセント付き文字は半角として扱う
+                if last_char_type == CharType::Hankaku {
+                    base_nodes.push(node.clone());
+                } else {
+                    found_different_type = true;
+                    remaining_nodes.push(node.clone());
+                }
+            }
             Node::DakutenKatakana { .. } => {
                 // 濁点カタカナはカタカナとして扱う
                 if last_char_type == CharType::Katakana {

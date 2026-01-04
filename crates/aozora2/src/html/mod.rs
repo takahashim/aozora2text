@@ -2,10 +2,16 @@
 //!
 //! 青空文庫形式のテキストをHTMLに変換します。
 
+mod block_manager;
+mod document_renderer;
+mod node_renderer;
 mod options;
+mod presentation;
 mod renderer;
+mod tag_generator;
 
 pub use options::RenderOptions;
+pub use presentation::html_escape;
 pub use renderer::HtmlRenderer;
 
 /// 青空文庫形式のテキストをHTMLに変換

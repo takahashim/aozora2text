@@ -1,6 +1,6 @@
 //! ブロック関連の型定義
 
-use super::MidashiLevel;
+use super::{MidashiLevel, MidashiStyle};
 
 /// ブロックタイプ
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -33,6 +33,12 @@ pub enum BlockType {
     Warigaki,
     /// ぶら下げ（折り返し字下げ）
     Burasage,
+    /// 装飾（傍点、傍線など）
+    Style,
+    /// 注記付き範囲（ルビとして表示）
+    AnnotationRange,
+    /// 左に注記付き範囲（左ルビ：現状は注記として出力）
+    LeftAnnotationRange,
 }
 
 impl BlockType {
@@ -43,7 +49,7 @@ impl BlockType {
             Some(BlockType::Burasage)
         } else if command.contains("字下げ") {
             Some(BlockType::Jisage)
-        } else if command.contains("地付き") || command.contains("地から") {
+        } else if command.contains("地付き") || command.contains("地から") || command.contains("字上げ") {
             Some(BlockType::Chitsuki)
         } else if command.contains("字詰め") {
             Some(BlockType::Jizume)
@@ -82,8 +88,20 @@ pub struct BlockParams {
     pub wrap_width: Option<u32>,
     /// 見出しレベル
     pub level: Option<MidashiLevel>,
+    /// 見出しスタイル（同行、窓など）
+    pub midashi_style: Option<MidashiStyle>,
     /// フォントサイズの段階
     pub font_size: Option<u32>,
+    /// 装飾タイプ（傍点、傍線など）
+    pub style_type: Option<super::StyleType>,
+    /// ブロックレベル（ここから）かどうか
+    pub is_block: bool,
+    /// 割り注: 直前に開き括弧（があるか
+    pub has_open_paren: bool,
+    /// 割り注: 直後に閉じ括弧）があるか
+    pub has_close_paren: bool,
+    /// 注記付き範囲の注記テキスト
+    pub annotation: Option<String>,
 }
 
 #[cfg(test)]

@@ -2,69 +2,62 @@
 //!
 //! `［＃...］` 形式のコマンド内容を解析し、適切なノードまたはコマンド情報を返します。
 
-use crate::node::{BlockParams, BlockType, MidashiLevel, MidashiStyle, StyleType};
+use crate::node::{BlockParams, BlockType, FontSizeType, MidashiLevel, MidashiStyle, StyleType};
+
+use super::block_parser::{
+    parse_block_end, parse_block_start, parse_inline_end, try_parse_font_size_start,
+    try_parse_line_chitsuki, try_parse_line_indent, try_parse_midashi_start,
+};
+use super::content_parser::{is_kaeriten, try_parse_image, try_parse_okurigana};
+use super::reference_parser::{try_parse_left_ruby, try_parse_reference};
 
 /// コマンド解析結果
 #[derive(Debug, Clone, PartialEq)]
 pub enum CommandResult {
     /// 装飾コマンド（後方参照）
     Style {
-        /// 対象テキスト
         target: String,
-        /// 接続詞（に、は、の）
         connector: String,
-        /// 装飾タイプ
         style_type: StyleType,
     },
 
     /// 見出しコマンド（後方参照）
     Midashi {
-        /// 対象テキスト
         target: String,
-        /// 見出しレベル
         level: MidashiLevel,
-        /// 見出しスタイル
         style: MidashiStyle,
+    },
+
+    /// フォントサイズコマンド（後方参照）
+    FontSize {
+        target: String,
+        size_type: FontSizeType,
+        level: u32,
     },
 
     /// ブロック開始
     BlockStart {
-        /// ブロックタイプ
         block_type: BlockType,
-        /// パラメータ
         params: BlockParams,
     },
 
     /// ブロック終了
-    BlockEnd {
-        /// ブロックタイプ
-        block_type: BlockType,
-    },
+    BlockEnd { block_type: BlockType },
 
     /// 行単位字下げ
-    LineIndent {
-        /// 字数
-        width: u32,
-    },
+    LineIndent { width: u32 },
 
     /// 行単位地付き/地から
-    LineChitsuki {
-        /// 字数
-        width: u32,
-    },
+    LineChitsuki { width: u32 },
 
     /// 注記
     Note(String),
 
     /// 画像
     Image {
-        /// ファイル名
         filename: String,
-        /// 代替テキスト
         alt: String,
-        /// 幅
         width: Option<u32>,
-        /// 高さ
         height: Option<u32>,
     },
 
@@ -86,12 +79,52 @@ pub enum CommandResult {
     /// 割り注終了
     WarigakiEnd,
 
+    /// 装飾開始
+    StyleStart { style_type: StyleType },
+
+    /// 装飾終了
+    StyleEnd { style_type: StyleType },
+
     /// 左ルビ指定
-    LeftRuby {
-        /// 対象テキスト
+    LeftRuby { target: String, ruby: String },
+
+    /// 注記ルビ（「対象」に「注記」の注記）
+    AnnotationRuby { target: String, annotation: String },
+
+    /// 縦中横（後方参照）
+    InlineTcy { target: String },
+
+    /// 罫囲み（後方参照）
+    InlineKeigakomi { target: String },
+
+    /// 横組み（後方参照）
+    InlineYokogumi { target: String },
+
+    /// キャプション（後方参照）
+    InlineCaption { target: String },
+
+    /// キャプション開始
+    CaptionStart,
+
+    /// キャプション終了
+    CaptionEnd,
+
+    /// 注記付き範囲開始
+    AnnotationRangeStart,
+
+    /// 左に注記付き範囲開始
+    LeftAnnotationRangeStart,
+
+    /// 注記付き範囲終了
+    AnnotationRangeEnd { annotation: String },
+
+    /// 左に注記付き範囲終了
+    LeftAnnotationRangeEnd { annotation: String },
+
+    /// 傍記（工場に「×」の傍記）
+    SideNote {
         target: String,
-        /// ルビテキスト
-        ruby: String,
+        annotation: String,
     },
 
     /// 未知のコマンド
@@ -102,314 +135,199 @@ pub enum CommandResult {
 pub fn parse_command(content: &str) -> CommandResult {
     let content = content.trim();
 
-    // 1. 後方参照パターン: 「対象」に/は/の 装飾
+    // 1. 左ルビパターン（後方参照より先にチェック）
+    if content.contains("の左に") && content.contains("のルビ") {
+        if let Some(result) = try_parse_left_ruby(content) {
+            return result;
+        }
+    }
+
+    // 2. 後方参照パターン: 「対象」に/は/の 装飾
     if let Some(result) = try_parse_reference(content) {
         return result;
     }
 
-    // 2. ブロック開始: ここから...
+    // 3. ブロック開始: ここから...
     if content.starts_with("ここから") {
         return parse_block_start(content);
     }
 
-    // 3. ブロック終了: ここで...終わり
+    // 4. ブロック終了: ここで...終わり
     if content.starts_with("ここで") && content.ends_with("終わり") {
         return parse_block_end(content);
     }
 
-    // 4. インライン終了: ...終わり
+    // 5. 注記付き範囲パターン
+    if let Some(result) = try_parse_annotation_range(content) {
+        return result;
+    }
+
+    // 6. 傍記パターン（「対象」に「注記」の傍記）
+    if let Some(result) = try_parse_side_note(content) {
+        return result;
+    }
+
+    // 7. インライン終了: ...終わり
     if content.ends_with("終わり") {
         return parse_inline_end(content);
     }
 
-    // 5. 行単位字下げ: N字下げ
+    // 6. 行単位字下げ: N字下げ
     if let Some(result) = try_parse_line_indent(content) {
         return result;
     }
 
-    // 5.5. 行単位地付き/地から: 地付き, 地からN字上げ
+    // 7. 行単位地付き/地から
     if let Some(result) = try_parse_line_chitsuki(content) {
         return result;
     }
 
-    // 6. 返り点
-    if content.starts_with("返り点") {
-        return CommandResult::Note(content.to_string());
+    // 8. 返り点
+    if is_kaeriten(content) {
+        return CommandResult::Kaeriten(content.to_string());
     }
 
-    // 7. 訓点送り仮名
+    // 9. 訓点送り仮名
+    if let Some(okurigana) = try_parse_okurigana(content) {
+        return CommandResult::Okurigana(okurigana);
+    }
+
+    // 10. 訓点送り仮名（説明付き）
     if content.starts_with("訓点送り仮名") {
         return CommandResult::Note(content.to_string());
     }
 
-    // 8. 画像
+    // 11. 画像
     if content.ends_with("入る") {
         if let Some(result) = try_parse_image(content) {
             return result;
         }
     }
 
-    // 9. 縦中横
+    // 12. 縦中横
     if content == "縦中横" {
         return CommandResult::TcyStart;
     }
 
-    // 10. 割り注
+    // 13. 割り注
     if content == "割り注" {
         return CommandResult::WarigakiStart;
+    }
+
+    // 13.5. 罫囲み（インライン）
+    if content == "罫囲み" {
+        return CommandResult::BlockStart {
+            block_type: BlockType::Keigakomi,
+            params: BlockParams::default(),
+        };
+    }
+
+    // 13.6. 横組み（インライン）
+    if content == "横組み" {
+        return CommandResult::BlockStart {
+            block_type: BlockType::Yokogumi,
+            params: BlockParams::default(),
+        };
+    }
+
+    // 14. 装飾開始
+    if let Some(style_type) = StyleType::from_command(content) {
+        return CommandResult::StyleStart { style_type };
+    }
+
+    // 15. キャプション開始
+    if content == "キャプション" {
+        return CommandResult::CaptionStart;
+    }
+
+    // 16. 見出し開始
+    if let Some(result) = try_parse_midashi_start(content) {
+        return result;
+    }
+
+    // 17. インラインフォントサイズ開始
+    if let Some(result) = try_parse_font_size_start(content) {
+        return result;
     }
 
     // その他は注記
     CommandResult::Note(content.to_string())
 }
 
-/// 後方参照パターンを解析
-fn try_parse_reference(content: &str) -> Option<CommandResult> {
-    // パターン: 「対象」に/は/の 装飾
-    let start = content.find('「')?;
-    let end = content.find('」')?;
-    if end <= start {
-        return None;
+/// 注記付き範囲パターンを解析
+fn try_parse_annotation_range(content: &str) -> Option<CommandResult> {
+    // 開始パターン
+    if content == "注記付き" {
+        return Some(CommandResult::AnnotationRangeStart);
+    }
+    if content == "左に注記付き" {
+        return Some(CommandResult::LeftAnnotationRangeStart);
     }
 
-    let target = &content[start + '「'.len_utf8()..end];
-    let rest = &content[end + '」'.len_utf8()..];
+    // 終了パターン: 「（銘々）」の注記付き終わり
+    if content.ends_with("の注記付き終わり") {
+        let rest = content.trim_end_matches("の注記付き終わり");
 
-    // 接続詞を探す
-    let (connector, spec) = if let Some(pos) = rest.find('に') {
-        ("に", &rest[pos + 'に'.len_utf8()..])
-    } else if let Some(pos) = rest.find('は') {
-        ("は", &rest[pos + 'は'.len_utf8()..])
-    } else if rest.find('の').is_some() {
-        // 「の左に」「のルビ」などのパターン
-        if rest.contains("の左に") && rest.contains("のルビ") {
-            // 左ルビパターン: 「親文字」の左に「ルビ」のルビ
-            if let Some(result) = try_parse_left_ruby(target, rest) {
-                return Some(result);
+        // 左パターン: 左に「...」の注記付き終わり
+        if let Some(rest) = rest.strip_prefix("左に") {
+            if let Some(annotation) = extract_bracket_content(rest) {
+                return Some(CommandResult::LeftAnnotationRangeEnd {
+                    annotation: annotation.to_string(),
+                });
             }
         }
-        ("の", &rest[rest.find('の').unwrap() + 'の'.len_utf8()..])
-    } else {
-        return None;
-    };
 
-    // 見出しかどうか
-    if connector == "は" {
-        if let Some(level) = MidashiLevel::from_command(spec) {
-            let style = MidashiStyle::from_command(spec);
-            return Some(CommandResult::Midashi {
-                target: target.to_string(),
-                level,
-                style,
+        // 通常パターン: 「...」の注記付き終わり
+        if let Some(annotation) = extract_bracket_content(rest) {
+            return Some(CommandResult::AnnotationRangeEnd {
+                annotation: annotation.to_string(),
             });
         }
     }
 
-    // 装飾タイプを取得
-    if let Some(style_type) = StyleType::from_command(spec) {
-        return Some(CommandResult::Style {
-            target: target.to_string(),
-            connector: connector.to_string(),
-            style_type,
-        });
-    }
-
     None
 }
 
-/// 左ルビパターンを解析
-fn try_parse_left_ruby(target: &str, rest: &str) -> Option<CommandResult> {
-    // パターン: の左に「ルビ」のルビ
-    let ruby_start = rest.find("「")?;
-    let ruby_end = rest.rfind("」")?;
-    if ruby_end <= ruby_start {
+/// 傍記パターンを解析（「対象」に「注記」の傍記）
+fn try_parse_side_note(content: &str) -> Option<CommandResult> {
+    if !content.ends_with("の傍記") {
         return None;
     }
 
-    let ruby = &rest[ruby_start + '「'.len_utf8()..ruby_end];
-    Some(CommandResult::LeftRuby {
+    let rest = content.trim_end_matches("の傍記");
+
+    // 「対象」に「注記」 形式を解析
+    let first_start = rest.find('「')?;
+    let first_end = rest.find('」')?;
+    if first_end <= first_start {
+        return None;
+    }
+
+    let target = &rest[first_start + '「'.len_utf8()..first_end];
+
+    // 「に「」パターンを探す
+    let after_first = &rest[first_end + '」'.len_utf8()..];
+    if !after_first.starts_with('に') {
+        return None;
+    }
+
+    let annotation_part = after_first.trim_start_matches('に');
+    let annotation = extract_bracket_content(annotation_part)?;
+
+    Some(CommandResult::SideNote {
         target: target.to_string(),
-        ruby: ruby.to_string(),
+        annotation: annotation.to_string(),
     })
 }
 
-/// ブロック開始を解析
-fn parse_block_start(content: &str) -> CommandResult {
-    let content = content.trim_start_matches("ここから");
-    let mut params = BlockParams::default();
-
-    // ぶら下げパターン: 「N字下げ、折り返してM字下げ」または「改行天付き、折り返してN字下げ」
-    if content.contains("折り返して") {
-        let parts: Vec<&str> = content.split("折り返して").collect();
-        if parts.len() == 2 {
-            let first_part = parts[0];
-            let second_part = parts[1];
-
-            // 折り返し幅を抽出
-            if let Some(wrap_width) = extract_number(second_part) {
-                params.wrap_width = Some(wrap_width);
-            }
-
-            // 最初の部分から字下げ幅を抽出
-            if first_part.contains("天付き") {
-                // 改行天付き: 最初の行は左端から
-                params.width = Some(0);
-            } else if let Some(width) = extract_number(first_part) {
-                params.width = Some(width);
-            }
-
-            return CommandResult::BlockStart {
-                block_type: BlockType::Burasage,
-                params,
-            };
-        }
-    }
-
-    // 数字を抽出
-    if let Some(width) = extract_number(content) {
-        params.width = Some(width);
-    }
-
-    // 段階を抽出
-    if content.contains("段階") {
-        if let Some(size) = extract_number(content) {
-            params.font_size = Some(size);
-        }
-    }
-
-    // ブロックタイプを判定
-    if let Some(block_type) = BlockType::from_command(content) {
-        // 見出しの場合はレベルも設定
-        if block_type == BlockType::Midashi {
-            params.level = MidashiLevel::from_command(content);
-        }
-        CommandResult::BlockStart { block_type, params }
-    } else {
-        CommandResult::Note(format!("ここから{content}"))
-    }
-}
-
-/// ブロック終了を解析
-fn parse_block_end(content: &str) -> CommandResult {
-    let content = content
-        .trim_start_matches("ここで")
-        .trim_end_matches("終わり");
-
-    if let Some(block_type) = BlockType::from_command(content) {
-        CommandResult::BlockEnd { block_type }
-    } else {
-        CommandResult::Note(format!("ここで{content}終わり"))
-    }
-}
-
-/// インライン終了を解析
-fn parse_inline_end(content: &str) -> CommandResult {
-    let content = content.trim_end_matches("終わり");
-
-    if content == "縦中横" {
-        return CommandResult::TcyEnd;
-    }
-    if content == "割り注" {
-        return CommandResult::WarigakiEnd;
-    }
-    if let Some(block_type) = BlockType::from_command(content) {
-        return CommandResult::BlockEnd { block_type };
-    }
-
-    CommandResult::Note(format!("{content}終わり"))
-}
-
-/// 行単位字下げを解析
-fn try_parse_line_indent(content: &str) -> Option<CommandResult> {
-    // パターン: N字下げ, この行N字下げ
-    if !content.contains("字下げ") {
+/// 「...」の内容を抽出
+fn extract_bracket_content(s: &str) -> Option<&str> {
+    let start = s.find('「')?;
+    let end = s.rfind('」')?;
+    if end <= start {
         return None;
     }
-
-    let width = extract_number(content)?;
-    Some(CommandResult::LineIndent { width })
-}
-
-/// 行単位地付き/地からを解析
-fn try_parse_line_chitsuki(content: &str) -> Option<CommandResult> {
-    // パターン: 地付き, 地からN字上げ
-    if content.contains("地付き") {
-        return Some(CommandResult::LineChitsuki { width: 0 });
-    }
-
-    if content.contains("地から") && content.contains("字上げ") {
-        let width = extract_number(content).unwrap_or(0);
-        return Some(CommandResult::LineChitsuki { width });
-    }
-
-    None
-}
-
-/// 画像コマンドを解析
-fn try_parse_image(content: &str) -> Option<CommandResult> {
-    // パターン: （説明）（ファイル名、横N×縦M）入る
-    let content = content.trim_end_matches("入る").trim();
-
-    // 最初の括弧から説明を取得
-    let alt_start = content.find('（')?;
-    let alt_end = content.find('）')?;
-    let alt = content[alt_start + '（'.len_utf8()..alt_end].to_string();
-
-    // 2番目の括弧からファイル情報を取得
-    let rest = &content[alt_end + '）'.len_utf8()..];
-    let info_start = rest.find('（')?;
-    let info_end = rest.find('）')?;
-    let info = &rest[info_start + '（'.len_utf8()..info_end];
-
-    // ファイル名とサイズを分離
-    let parts: Vec<&str> = info.split('、').collect();
-    let filename = parts.first()?.to_string();
-
-    let mut width = None;
-    let mut height = None;
-
-    if parts.len() > 1 {
-        let size_part = parts[1];
-        // 横N×縦M パターン
-        if let Some(w_pos) = size_part.find('横') {
-            if let Some(x_pos) = size_part.find('×') {
-                let w_str = &size_part[w_pos + '横'.len_utf8()..x_pos];
-                width = w_str.parse().ok();
-            }
-        }
-        if let Some(h_pos) = size_part.find('縦') {
-            let h_str = &size_part[h_pos + '縦'.len_utf8()..];
-            height = h_str
-                .trim_end_matches(|c: char| !c.is_ascii_digit())
-                .parse()
-                .ok();
-        }
-    }
-
-    Some(CommandResult::Image {
-        filename,
-        alt,
-        width,
-        height,
-    })
-}
-
-/// 文字列から数字を抽出（全角数字も対応）
-fn extract_number(s: &str) -> Option<u32> {
-    let digits: String = s
-        .chars()
-        .filter_map(|c| {
-            if c.is_ascii_digit() {
-                Some(c)
-            } else if ('０'..='９').contains(&c) {
-                // 全角数字をASCII数字に変換
-                Some((c as u32 - '０' as u32 + '0' as u32) as u8 as char)
-            } else {
-                None
-            }
-        })
-        .collect();
-    digits.parse().ok()
+    Some(&s[start + '「'.len_utf8()..end])
 }
 
 #[cfg(test)]
@@ -477,6 +395,7 @@ mod tests {
                 block_type: BlockType::Jisage,
                 params: BlockParams {
                     width: Some(2),
+                    is_block: true,
                     ..Default::default()
                 },
             }
@@ -519,21 +438,6 @@ mod tests {
     }
 
     #[test]
-    fn test_extract_number() {
-        assert_eq!(extract_number("2字下げ"), Some(2));
-        assert_eq!(extract_number("10字詰め"), Some(10));
-        assert_eq!(extract_number("字下げ"), None);
-    }
-
-    #[test]
-    fn test_extract_number_fullwidth() {
-        // 全角数字のテスト
-        assert_eq!(extract_number("２字下げ"), Some(2));
-        assert_eq!(extract_number("３字下げ"), Some(3));
-        assert_eq!(extract_number("１０字詰め"), Some(10));
-    }
-
-    #[test]
     fn test_parse_block_start_jisage_fullwidth() {
         let result = parse_command("ここから２字下げ");
         assert_eq!(
@@ -542,6 +446,7 @@ mod tests {
                 block_type: BlockType::Jisage,
                 params: BlockParams {
                     width: Some(2),
+                    is_block: true,
                     ..Default::default()
                 },
             }
@@ -556,11 +461,9 @@ mod tests {
 
     #[test]
     fn test_parse_line_chitsuki() {
-        // 地付き
         let result = parse_command("地付き");
         assert_eq!(result, CommandResult::LineChitsuki { width: 0 });
 
-        // 地からN字上げ
         let result = parse_command("地から１字上げ");
         assert_eq!(result, CommandResult::LineChitsuki { width: 1 });
 

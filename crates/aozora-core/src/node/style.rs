@@ -3,7 +3,7 @@
 /// 装飾タイプ
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum StyleType {
-    // 傍点系
+    // 傍点系（右・上）
     SesameDot,
     WhiteSesameDot,
     BlackCircle,
@@ -14,12 +14,30 @@ pub enum StyleType {
     Fisheye,
     Saltire,
 
-    // 傍線系
+    // 傍点系（左・下）
+    SesameDotAfter,
+    WhiteSesameDotAfter,
+    BlackCircleAfter,
+    WhiteCircleAfter,
+    BlackTriangleAfter,
+    WhiteTriangleAfter,
+    BullseyeAfter,
+    FisheyeAfter,
+    SaltireAfter,
+
+    // 傍線系（右・上）
     UnderlineSolid,
     UnderlineDouble,
     UnderlineDotted,
     UnderlineDashed,
     UnderlineWave,
+
+    // 傍線系（左・下）
+    OverlineSolid,
+    OverlineDouble,
+    OverlineDotted,
+    OverlineDashed,
+    OverlineWave,
 
     // 文字スタイル
     Bold,
@@ -32,6 +50,7 @@ impl StyleType {
     /// コマンド名から装飾タイプを取得
     pub fn from_command(command: &str) -> Option<Self> {
         match command {
+            // 傍点系（右・上）
             "傍点" => Some(StyleType::SesameDot),
             "白ゴマ傍点" => Some(StyleType::WhiteSesameDot),
             "丸傍点" => Some(StyleType::BlackCircle),
@@ -41,16 +60,58 @@ impl StyleType {
             "二重丸傍点" => Some(StyleType::Bullseye),
             "蛇の目傍点" => Some(StyleType::Fisheye),
             "ばつ傍点" => Some(StyleType::Saltire),
+            // 傍点系（左・下）
+            "左に傍点" => Some(StyleType::SesameDotAfter),
+            "左に白ゴマ傍点" => Some(StyleType::WhiteSesameDotAfter),
+            "左に丸傍点" => Some(StyleType::BlackCircleAfter),
+            "左に白丸傍点" => Some(StyleType::WhiteCircleAfter),
+            "左に黒三角傍点" => Some(StyleType::BlackTriangleAfter),
+            "左に白三角傍点" => Some(StyleType::WhiteTriangleAfter),
+            "左に二重丸傍点" => Some(StyleType::BullseyeAfter),
+            "左に蛇の目傍点" => Some(StyleType::FisheyeAfter),
+            "左にばつ傍点" => Some(StyleType::SaltireAfter),
+            // 傍線系（右・上）
             "傍線" => Some(StyleType::UnderlineSolid),
             "二重傍線" => Some(StyleType::UnderlineDouble),
             "鎖線" => Some(StyleType::UnderlineDotted),
             "破線" => Some(StyleType::UnderlineDashed),
             "波線" => Some(StyleType::UnderlineWave),
+            // 傍線系（左・下）
+            "左に傍線" => Some(StyleType::OverlineSolid),
+            "左に二重傍線" => Some(StyleType::OverlineDouble),
+            "左に鎖線" => Some(StyleType::OverlineDotted),
+            "左に破線" => Some(StyleType::OverlineDashed),
+            "左に波線" => Some(StyleType::OverlineWave),
+            // 文字スタイル
             "太字" => Some(StyleType::Bold),
             "斜体" => Some(StyleType::Italic),
             "下付き小文字" | "行左小書き" => Some(StyleType::Subscript),
             "上付き小文字" | "行右小書き" => Some(StyleType::Superscript),
             _ => None,
+        }
+    }
+
+    /// 通常バリアントをAfterバリアントに変換（左側表示用）
+    pub fn to_after_variant(self) -> Self {
+        match self {
+            // 傍点系
+            StyleType::SesameDot => StyleType::SesameDotAfter,
+            StyleType::WhiteSesameDot => StyleType::WhiteSesameDotAfter,
+            StyleType::BlackCircle => StyleType::BlackCircleAfter,
+            StyleType::WhiteCircle => StyleType::WhiteCircleAfter,
+            StyleType::BlackTriangle => StyleType::BlackTriangleAfter,
+            StyleType::WhiteTriangle => StyleType::WhiteTriangleAfter,
+            StyleType::Bullseye => StyleType::BullseyeAfter,
+            StyleType::Fisheye => StyleType::FisheyeAfter,
+            StyleType::Saltire => StyleType::SaltireAfter,
+            // 傍線系
+            StyleType::UnderlineSolid => StyleType::OverlineSolid,
+            StyleType::UnderlineDouble => StyleType::OverlineDouble,
+            StyleType::UnderlineDotted => StyleType::OverlineDotted,
+            StyleType::UnderlineDashed => StyleType::OverlineDashed,
+            StyleType::UnderlineWave => StyleType::OverlineWave,
+            // 既にAfterバリアントの場合はそのまま
+            other => other,
         }
     }
 
@@ -66,11 +127,25 @@ impl StyleType {
             StyleType::Bullseye => "二重丸傍点",
             StyleType::Fisheye => "蛇の目傍点",
             StyleType::Saltire => "ばつ傍点",
+            StyleType::SesameDotAfter => "左に傍点",
+            StyleType::WhiteSesameDotAfter => "左に白ゴマ傍点",
+            StyleType::BlackCircleAfter => "左に丸傍点",
+            StyleType::WhiteCircleAfter => "左に白丸傍点",
+            StyleType::BlackTriangleAfter => "左に黒三角傍点",
+            StyleType::WhiteTriangleAfter => "左に白三角傍点",
+            StyleType::BullseyeAfter => "左に二重丸傍点",
+            StyleType::FisheyeAfter => "左に蛇の目傍点",
+            StyleType::SaltireAfter => "左にばつ傍点",
             StyleType::UnderlineSolid => "傍線",
             StyleType::UnderlineDouble => "二重傍線",
             StyleType::UnderlineDotted => "鎖線",
             StyleType::UnderlineDashed => "破線",
             StyleType::UnderlineWave => "波線",
+            StyleType::OverlineSolid => "左に傍線",
+            StyleType::OverlineDouble => "左に二重傍線",
+            StyleType::OverlineDotted => "左に鎖線",
+            StyleType::OverlineDashed => "左に破線",
+            StyleType::OverlineWave => "左に波線",
             StyleType::Bold => "太字",
             StyleType::Italic => "斜体",
             StyleType::Subscript => "下付き小文字",
