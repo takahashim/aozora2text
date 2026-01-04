@@ -29,8 +29,8 @@ pub fn parse(tokens: &[Token]) -> Vec<Node> {
     let mut nodes = Vec::new();
 
     for token in tokens {
-        let node = parse_token(token);
-        nodes.push(node);
+        let parsed = parse_token(token);
+        nodes.extend(parsed);
     }
 
     // 前方参照の解決
@@ -39,20 +39,20 @@ pub fn parse(tokens: &[Token]) -> Vec<Node> {
     nodes
 }
 
-/// 単一のトークンをノードに変換
-fn parse_token(token: &Token) -> Node {
+/// 単一のトークンをノード（複数可）に変換
+fn parse_token(token: &Token) -> Vec<Node> {
     match token {
-        Token::Text(text) => Node::Text(text.clone()),
+        Token::Text(text) => vec![Node::Text(text.clone())],
 
         Token::Ruby { children } => {
             // ルビの親文字はここでは未解決
             // 後でreference_resolverで処理される
             let ruby_nodes = parse_tokens(children);
-            Node::Ruby {
+            vec![Node::Ruby {
                 children: vec![],
                 ruby: ruby_nodes,
                 direction: RubyDirection::Right,
-            }
+            }]
         }
 
         Token::PrefixedRuby {
@@ -61,29 +61,45 @@ fn parse_token(token: &Token) -> Node {
         } => {
             let base_nodes = parse_tokens(base_children);
             let ruby_nodes = parse_tokens(ruby_children);
-            Node::Ruby {
+            vec![Node::Ruby {
                 children: base_nodes,
                 ruby: ruby_nodes,
                 direction: RubyDirection::Right,
-            }
+            }]
         }
 
-        Token::Command { content } => parse_command_to_node(content),
+        Token::Command { content } => vec![parse_command_to_node(content)],
 
-        Token::Gaiji { description } => parse_gaiji_to_node(description),
+        Token::Gaiji { description } => vec![parse_gaiji_to_node(description)],
 
         Token::Accent { children } => {
             let inner_nodes = parse_tokens(children);
             let text: String = inner_nodes.iter().map(|n| n.to_text()).collect();
-            let converted = crate::accent::convert_accent(&text);
-            Node::Text(converted)
+
+            // parse_accent を使ってJISコード情報を保持したノードを作成
+            use crate::accent::{parse_accent, AccentPart};
+            parse_accent(&text)
+                .into_iter()
+                .map(|part| match part {
+                    AccentPart::Text(s) => Node::Text(s),
+                    AccentPart::Accent {
+                        jis_code,
+                        name,
+                        unicode,
+                    } => Node::Accent {
+                        code: jis_code,
+                        name,
+                        unicode: Some(unicode),
+                    },
+                })
+                .collect()
         }
     }
 }
 
 /// トークン列をノード列に変換（再帰用、前方参照解決なし）
 fn parse_tokens(tokens: &[Token]) -> Vec<Node> {
-    tokens.iter().map(parse_token).collect()
+    tokens.iter().flat_map(parse_token).collect()
 }
 
 /// コマンドをノードに変換
@@ -137,6 +153,14 @@ fn parse_command_to_node(content: &str) -> Node {
             block_type: BlockType::Jisage,
             params: BlockParams {
                 width: Some(width),
+                ..Default::default()
+            },
+        },
+
+        CommandResult::LineChitsuki { width } => Node::BlockStart {
+            block_type: BlockType::Chitsuki,
+            params: BlockParams {
+                width: if width > 0 { Some(width) } else { None },
                 ..Default::default()
             },
         },

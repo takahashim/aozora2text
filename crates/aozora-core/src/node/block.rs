@@ -31,12 +31,17 @@ pub enum BlockType {
     Caption,
     /// 割り注
     Warigaki,
+    /// ぶら下げ（折り返し字下げ）
+    Burasage,
 }
 
 impl BlockType {
     /// コマンド名からブロックタイプを取得
     pub fn from_command(command: &str) -> Option<Self> {
-        if command.contains("字下げ") {
+        // 折り返しがある場合はBurasage（コマンドパーサーで先に処理されるが念のため）
+        if command.contains("折り返して") {
+            Some(BlockType::Burasage)
+        } else if command.contains("字下げ") {
             Some(BlockType::Jisage)
         } else if command.contains("地付き") || command.contains("地から") {
             Some(BlockType::Chitsuki)
@@ -73,6 +78,8 @@ impl BlockType {
 pub struct BlockParams {
     /// 幅（字下げの字数など）
     pub width: Option<u32>,
+    /// 折り返し幅（ぶら下げ用）
+    pub wrap_width: Option<u32>,
     /// 見出しレベル
     pub level: Option<MidashiLevel>,
     /// フォントサイズの段階

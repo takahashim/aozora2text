@@ -47,6 +47,12 @@ pub enum CommandResult {
         width: u32,
     },
 
+    /// 行単位地付き/地から
+    LineChitsuki {
+        /// 字数
+        width: u32,
+    },
+
     /// 注記
     Note(String),
 
@@ -118,6 +124,11 @@ pub fn parse_command(content: &str) -> CommandResult {
 
     // 5. 行単位字下げ: N字下げ
     if let Some(result) = try_parse_line_indent(content) {
+        return result;
+    }
+
+    // 5.5. 行単位地付き/地から: 地付き, 地からN字上げ
+    if let Some(result) = try_parse_line_chitsuki(content) {
         return result;
     }
 
@@ -227,6 +238,33 @@ fn parse_block_start(content: &str) -> CommandResult {
     let content = content.trim_start_matches("ここから");
     let mut params = BlockParams::default();
 
+    // ぶら下げパターン: 「N字下げ、折り返してM字下げ」または「改行天付き、折り返してN字下げ」
+    if content.contains("折り返して") {
+        let parts: Vec<&str> = content.split("折り返して").collect();
+        if parts.len() == 2 {
+            let first_part = parts[0];
+            let second_part = parts[1];
+
+            // 折り返し幅を抽出
+            if let Some(wrap_width) = extract_number(second_part) {
+                params.wrap_width = Some(wrap_width);
+            }
+
+            // 最初の部分から字下げ幅を抽出
+            if first_part.contains("天付き") {
+                // 改行天付き: 最初の行は左端から
+                params.width = Some(0);
+            } else if let Some(width) = extract_number(first_part) {
+                params.width = Some(width);
+            }
+
+            return CommandResult::BlockStart {
+                block_type: BlockType::Burasage,
+                params,
+            };
+        }
+    }
+
     // 数字を抽出
     if let Some(width) = extract_number(content) {
         params.width = Some(width);
@@ -290,6 +328,21 @@ fn try_parse_line_indent(content: &str) -> Option<CommandResult> {
 
     let width = extract_number(content)?;
     Some(CommandResult::LineIndent { width })
+}
+
+/// 行単位地付き/地からを解析
+fn try_parse_line_chitsuki(content: &str) -> Option<CommandResult> {
+    // パターン: 地付き, 地からN字上げ
+    if content.contains("地付き") {
+        return Some(CommandResult::LineChitsuki { width: 0 });
+    }
+
+    if content.contains("地から") && content.contains("字上げ") {
+        let width = extract_number(content).unwrap_or(0);
+        return Some(CommandResult::LineChitsuki { width });
+    }
+
+    None
 }
 
 /// 画像コマンドを解析
@@ -499,5 +552,19 @@ mod tests {
     fn test_parse_line_indent_fullwidth() {
         let result = parse_command("３字下げ");
         assert_eq!(result, CommandResult::LineIndent { width: 3 });
+    }
+
+    #[test]
+    fn test_parse_line_chitsuki() {
+        // 地付き
+        let result = parse_command("地付き");
+        assert_eq!(result, CommandResult::LineChitsuki { width: 0 });
+
+        // 地からN字上げ
+        let result = parse_command("地から１字上げ");
+        assert_eq!(result, CommandResult::LineChitsuki { width: 1 });
+
+        let result = parse_command("地から3字上げ");
+        assert_eq!(result, CommandResult::LineChitsuki { width: 3 });
     }
 }

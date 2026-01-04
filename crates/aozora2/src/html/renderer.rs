@@ -2,6 +2,9 @@
 //!
 //! ASTノードをHTMLに変換します。
 
+use aozora_core::document::{
+    extract_bibliographical_lines, extract_body_lines, extract_header_info, HeaderInfo,
+};
 use aozora_core::gaiji::{parse_gaiji, GaijiResult};
 use aozora_core::node::{
     BlockParams, BlockType, MidashiLevel, MidashiStyle, Node, RubyDirection, StyleType,
@@ -11,6 +14,9 @@ use aozora_core::parser::reference_resolver::resolve_inline_ruby;
 use aozora_core::tokenizer::tokenize;
 
 use super::options::RenderOptions;
+
+/// 青空文庫パブリッシャー名
+const AOZORA_BUNKO: &str = "青空文庫";
 
 // ============================================================================
 // プレゼンテーションロジック（CSSクラス、HTMLタグのマッピング）
@@ -74,6 +80,16 @@ pub struct HtmlRenderer {
     options: RenderOptions,
     /// 現在のブロックスタック
     block_stack: Vec<BlockContext>,
+    /// 見出しIDカウンター
+    midashi_id_counter: u32,
+    /// 注記を使用したかどうか
+    has_notes: bool,
+    /// 外字画像を使用したかどうか
+    has_gaiji_images: bool,
+    /// アクセント記号を使用したかどうか
+    has_accent: bool,
+    /// JIS X 0213文字を使用したかどうか
+    has_jisx0213: bool,
 }
 
 /// ブロックコンテキスト
@@ -89,21 +105,69 @@ impl HtmlRenderer {
         Self {
             options,
             block_stack: Vec::new(),
+            midashi_id_counter: 100,
+            has_notes: false,
+            has_gaiji_images: false,
+            has_accent: false,
+            has_jisx0213: false,
         }
     }
 
     /// テキスト全体をHTMLに変換
     pub fn render(&mut self, input: &str) -> String {
         let mut output = String::new();
+        let lines: Vec<&str> = input.lines().collect();
 
-        if self.options.full_document {
-            self.render_html_head(&mut output);
-        }
+        // ヘッダー情報を抽出
+        let header_info = extract_header_info(&lines);
 
-        for line in input.lines() {
+        // HTMLヘッダーとメタデータセクションを出力
+        self.render_html_head(&mut output, &header_info);
+        self.render_metadata_section(&mut output, &header_info);
+
+        // main_text開始
+        output.push_str(
+            "<div id=\"contents\" style=\"display:none\"></div><div class=\"main_text\">",
+        );
+
+        // 本文のみ抽出してレンダリング
+        let body_lines = extract_body_lines(&lines);
+        for line in &body_lines {
             let line_html = self.render_line(line);
+
+            // ぶら下げブロック内かどうかをチェック
+            let burasage_ctx = self.find_burasage_context();
+
+            if let Some((wrap_width, text_indent)) = burasage_ctx {
+                // ぶら下げブロック内: 各行を個別のdivでラップ
+                // ただし、ブロック要素で始まる/終わる行はラップしない
+                let is_block_line = line_html.is_empty()
+                    || line_html.starts_with("<div class=\"")
+                    || line_html.starts_with("<h3")
+                    || line_html.starts_with("<h4")
+                    || line_html.starts_with("<h5")
+                    || line_html.ends_with("</div>")
+                    || line_html.ends_with("</h3>")
+                    || line_html.ends_with("</h4>")
+                    || line_html.ends_with("</h5>");
+
+                if !is_block_line {
+                    output.push_str(&format!(
+                        "<div class=\"burasage\" style=\"margin-left: {wrap_width}em; text-indent: {text_indent}em;\">{line_html}</div>"
+                    ));
+                    output.push_str("\r\n");
+                    continue;
+                }
+            }
+
             output.push_str(&line_html);
-            output.push('\n');
+
+            // ブロック開始/終了だけの行（div/h3/h4/h5で終わる）には<br />を追加しない
+            let needs_br = !is_block_only_line(&line_html);
+            if needs_br {
+                output.push_str("<br />");
+            }
+            output.push_str("\r\n");
         }
 
         // 閉じられていないブロックを閉じる
@@ -111,9 +175,22 @@ impl HtmlRenderer {
             output.push_str(&self.render_block_end_tag(&ctx.block_type, &ctx.params));
         }
 
-        if self.options.full_document {
-            self.render_html_foot(&mut output);
+        // main_text終了
+        output.push_str("</div>\r\n");
+
+        // 底本情報（bibliographical_information）セクション
+        let biblio_lines = extract_bibliographical_lines(&lines);
+        if !biblio_lines.is_empty() {
+            self.render_bibliographical_section(&mut output, &biblio_lines);
         }
+
+        // 表記について（notation_notes）セクション
+        self.render_notation_notes(&mut output);
+
+        // 図書カードセクション
+        self.render_card_section(&mut output);
+
+        self.render_html_foot(&mut output);
 
         output
     }
@@ -126,7 +203,28 @@ impl HtmlRenderer {
         // 行内ルビを解決
         resolve_inline_ruby(&mut nodes);
 
-        self.render_nodes(&nodes)
+        // 行の開始時点でのブロックスタックの長さを記録
+        let stack_len_before = self.block_stack.len();
+
+        let mut output = self.render_nodes(&nodes);
+
+        // 行単位字下げ: 行の終わりで、その行で開いたブロックを閉じる
+        // 「ここから」で始まるブロックは BlockParams に幅があるが、
+        // 元のコマンドが「ここから」かどうかを判定するため、元の行をチェック
+        let is_line_scope_block = line.starts_with("［＃")
+            && !line.contains("ここから")
+            && (line.contains("字下げ") || line.contains("地付き") || line.contains("地から"));
+
+        if is_line_scope_block {
+            // その行で開いたブロックを閉じる
+            while self.block_stack.len() > stack_len_before {
+                if let Some(ctx) = self.block_stack.pop() {
+                    output.push_str(&self.render_block_end_tag(&ctx.block_type, &ctx.params));
+                }
+            }
+        }
+
+        output
     }
 
     /// ノード列をHTMLに変換
@@ -170,10 +268,31 @@ impl HtmlRenderer {
             } => self.render_gaiji(description, unicode.as_deref(), jis_code.as_deref()),
 
             Node::Accent {
-                code: _,
-                name: _,
+                code,
+                name,
                 unicode,
-            } => unicode.clone().unwrap_or_default(),
+            } => {
+                self.has_accent = true;
+                if self.options.use_jisx0213 || self.options.use_unicode {
+                    // --use-jisx0213 or --use-unicode: 数値実体参照で出力
+                    if let Some(u) = unicode {
+                        u.chars().map(|c| format!("&#{};", c as u32)).collect()
+                    } else {
+                        String::new()
+                    }
+                } else {
+                    // デフォルト: 画像として出力（Ruby版と同じ）
+                    self.has_gaiji_images = true;
+                    let (folder, file) = jis_code_to_path(code);
+                    format!(
+                        "<img src=\"{}{}/{}.png\" alt=\"※({})\" class=\"gaiji\" />",
+                        self.options.gaiji_dir,
+                        folder,
+                        file,
+                        html_escape(name)
+                    )
+                }
+            }
 
             Node::Img {
                 filename,
@@ -215,22 +334,56 @@ impl HtmlRenderer {
             }
 
             Node::BlockStart { block_type, params } => {
+                let mut output = String::new();
+
+                // 新しいブロック開始時は、開いている同タイプまたは関連ブロックを閉じる
+                if *block_type == BlockType::Jisage
+                    || *block_type == BlockType::Chitsuki
+                    || *block_type == BlockType::Burasage
+                {
+                    // 同タイプまたは関連ブロックを探して閉じる
+                    while let Some(pos) = self.block_stack.iter().rposition(|c| {
+                        c.block_type == *block_type
+                            || c.block_type == BlockType::Burasage
+                            || (*block_type == BlockType::Jisage
+                                && c.block_type == BlockType::Jisage)
+                    }) {
+                        let ctx = self.block_stack.remove(pos);
+                        // Burasageは終了タグを出力しない
+                        if ctx.block_type != BlockType::Burasage {
+                            output
+                                .push_str(&self.render_block_end_tag(&ctx.block_type, &ctx.params));
+                        }
+                    }
+                }
+
                 self.block_stack.push(BlockContext {
                     block_type: *block_type,
                     params: params.clone(),
                 });
-                self.render_block_start_tag(block_type, params)
+                // Burasageは各行で個別にラップするため、開始タグを出力しない
+                if *block_type != BlockType::Burasage {
+                    output.push_str(&self.render_block_start_tag(block_type, params));
+                }
+                output
             }
 
             Node::BlockEnd { block_type } => {
                 // スタックから対応するブロックを探して閉じる
-                if let Some(pos) = self
-                    .block_stack
-                    .iter()
-                    .rposition(|c| c.block_type == *block_type)
-                {
+                // Jisage終了でBurasageも閉じる（「ここで字下げ終わり」がBurasageを閉じる）
+                let pos = self.block_stack.iter().rposition(|c| {
+                    c.block_type == *block_type
+                        || (*block_type == BlockType::Jisage && c.block_type == BlockType::Burasage)
+                });
+
+                if let Some(pos) = pos {
                     let ctx = self.block_stack.remove(pos);
-                    self.render_block_end_tag(block_type, &ctx.params)
+                    // Burasageは各行で個別にラップするため、終了タグを出力しない
+                    if ctx.block_type == BlockType::Burasage {
+                        String::new()
+                    } else {
+                        self.render_block_end_tag(&ctx.block_type, &ctx.params)
+                    }
                 } else {
                     // 対応するブロックがない場合は空文字
                     String::new()
@@ -238,6 +391,7 @@ impl HtmlRenderer {
             }
 
             Node::Note(text) => {
+                self.has_notes = true;
                 format!("<span class=\"notes\">［＃{}］</span>", html_escape(text))
             }
 
@@ -312,56 +466,99 @@ impl HtmlRenderer {
         let inner = self.render_nodes(children);
         let tag = midashi_html_tag(level);
         let class = midashi_css_class(level);
+        let midashi_id = self.generate_midashi_id();
 
         match style {
             MidashiStyle::Normal => {
-                format!("<{tag} class=\"{class}\">{inner}</{tag}>")
+                // 通常見出しにもアンカーを追加
+                format!(
+                    "<{tag} class=\"{class}\"><a class=\"midashi_anchor\" id=\"midashi{midashi_id}\">{inner}</a></{tag}>"
+                )
             }
             MidashiStyle::Dogyo => {
                 // 同行見出し
                 format!(
-                    "<{} class=\"{} dogyo-midashi\"><a class=\"midashi_anchor\" id=\"midashi{}\"></a>{}</{}>",
-                    tag, class, self.generate_midashi_id(), inner, tag
+                    "<{tag} class=\"{class} dogyo-midashi\"><a class=\"midashi_anchor\" id=\"midashi{midashi_id}\">{inner}</a></{tag}>"
                 )
             }
             MidashiStyle::Mado => {
                 // 窓見出し
-                format!("<{tag} class=\"{class} mado-midashi\">{inner}</{tag}>")
+                format!(
+                    "<{tag} class=\"{class} mado-midashi\"><a class=\"midashi_anchor\" id=\"midashi{midashi_id}\">{inner}</a></{tag}>"
+                )
             }
         }
     }
 
-    /// 見出しIDを生成（簡易版）
-    fn generate_midashi_id(&self) -> u32 {
-        // 実際の実装では一意なIDを生成する
-        0
+    /// 見出しIDを生成
+    fn generate_midashi_id(&mut self) -> u32 {
+        let id = self.midashi_id_counter;
+        self.midashi_id_counter += 10;
+        id
+    }
+
+    /// ぶら下げブロック内かどうかをチェックし、パラメータを返す
+    fn find_burasage_context(&self) -> Option<(u32, i32)> {
+        for ctx in &self.block_stack {
+            if ctx.block_type == BlockType::Burasage {
+                let wrap_width = ctx.params.wrap_width.unwrap_or(1);
+                let width = ctx.params.width.unwrap_or(0);
+                let text_indent = width as i32 - wrap_width as i32;
+                return Some((wrap_width, text_indent));
+            }
+        }
+        None
     }
 
     /// 外字をHTMLに変換
     fn render_gaiji(
-        &self,
+        &mut self,
         description: &str,
         unicode: Option<&str>,
         jis_code: Option<&str>,
     ) -> String {
         // すでにパース済みの情報がある場合はそれを使用
-        if let Some(u) = unicode {
-            if self.options.use_unicode {
-                return u.chars().map(|c| format!("&#{};", c as u32)).collect();
+        match (unicode, jis_code) {
+            // JisConverted: unicodeとjis_code両方がある場合
+            (Some(u), Some(jis)) => {
+                self.has_jisx0213 = true;
+                if self.options.use_jisx0213 || self.options.use_unicode {
+                    // --use-jisx0213 or --use-unicode: 数値実体参照で出力
+                    return u.chars().map(|c| format!("&#{};", c as u32)).collect();
+                } else {
+                    // デフォルト: 画像として出力（Ruby版と同じ）
+                    self.has_gaiji_images = true;
+                    let (folder, file) = jis_code_to_path(jis);
+                    return format!(
+                        "<img src=\"{}{}/{}.png\" alt=\"※({})\" class=\"gaiji\" />",
+                        self.options.gaiji_dir,
+                        folder,
+                        file,
+                        html_escape(description)
+                    );
+                }
             }
-            return u.to_string();
-        }
-
-        if let Some(jis) = jis_code {
-            // JISコードから画像を生成
-            let (folder, file) = jis_code_to_path(jis);
-            return format!(
-                "<img src=\"{}{}/{}.png\" alt=\"※({})\" class=\"gaiji\" />",
-                self.options.gaiji_dir,
-                folder,
-                file,
-                html_escape(description)
-            );
+            // Unicode: unicodeだけがある場合
+            (Some(u), None) => {
+                if self.options.use_unicode {
+                    return u.chars().map(|c| format!("&#{};", c as u32)).collect();
+                }
+                return u.to_string();
+            }
+            // JisImage: jis_codeだけがある場合（変換テーブルにない）
+            (None, Some(jis)) => {
+                self.has_gaiji_images = true;
+                let (folder, file) = jis_code_to_path(jis);
+                return format!(
+                    "<img src=\"{}{}/{}.png\" alt=\"※({})\" class=\"gaiji\" />",
+                    self.options.gaiji_dir,
+                    folder,
+                    file,
+                    html_escape(description)
+                );
+            }
+            // 両方Noneの場合は下でparse_gaijiを再実行
+            (None, None) => {}
         }
 
         // パース済み情報がない場合は再度パース
@@ -374,16 +571,28 @@ impl HtmlRenderer {
                 }
             }
             GaijiResult::JisConverted {
-                jis_code: _,
+                jis_code: jis,
                 unicode: u,
             } => {
+                self.has_jisx0213 = true;
                 if self.options.use_jisx0213 || self.options.use_unicode {
+                    // --use-jisx0213 or --use-unicode: 数値実体参照で出力
                     u.chars().map(|c| format!("&#{};", c as u32)).collect()
                 } else {
-                    u
+                    // デフォルト: 画像として出力（Ruby版と同じ）
+                    self.has_gaiji_images = true;
+                    let (folder, file) = jis_code_to_path(&jis);
+                    format!(
+                        "<img src=\"{}{}/{}.png\" alt=\"※({})\" class=\"gaiji\" />",
+                        self.options.gaiji_dir,
+                        folder,
+                        file,
+                        html_escape(description)
+                    )
                 }
             }
             GaijiResult::JisImage { jis_code: jis } => {
+                self.has_gaiji_images = true;
                 let (folder, file) = jis_code_to_path(&jis);
                 format!(
                     "<img src=\"{}{}/{}.png\" alt=\"※({})\" class=\"gaiji\" />",
@@ -438,21 +647,20 @@ impl HtmlRenderer {
         match block_type {
             BlockType::Jisage => {
                 if let Some(width) = params.width {
-                    format!("<div class=\"jisage_{width}\">")
+                    format!("<div class=\"jisage_{width}\" style=\"margin-left: {width}em\">")
                 } else {
                     "<div class=\"jisage\">".to_string()
                 }
             }
             BlockType::Chitsuki => {
-                if let Some(width) = params.width {
-                    format!("<div class=\"chitsuki_{width}\">")
-                } else {
-                    "<div class=\"chitsuki\">".to_string()
-                }
+                let width = params.width.unwrap_or(0);
+                format!(
+                    "<div class=\"chitsuki_{width}\" style=\"text-align:right; margin-right: {width}em\">"
+                )
             }
             BlockType::Jizume => {
                 if let Some(width) = params.width {
-                    format!("<div class=\"jizume_{width}\">")
+                    format!("<div class=\"jizume_{width}\" style=\"width: {width}em\">")
                 } else {
                     "<div class=\"jizume\">".to_string()
                 }
@@ -489,6 +697,15 @@ impl HtmlRenderer {
             BlockType::Tcy => "<span class=\"tcy\">".to_string(),
             BlockType::Caption => "<span class=\"caption\">".to_string(),
             BlockType::Warigaki => "<span class=\"warichu\">".to_string(),
+            BlockType::Burasage => {
+                // ぶら下げ: margin-left = wrap_width, text-indent = width - wrap_width
+                let wrap_width = params.wrap_width.unwrap_or(1);
+                let width = params.width.unwrap_or(0);
+                let text_indent = width as i32 - wrap_width as i32;
+                format!(
+                    "<div class=\"burasage\" style=\"margin-left: {wrap_width}em; text-indent: {text_indent}em;\">"
+                )
+            }
         }
     }
 
@@ -501,7 +718,8 @@ impl HtmlRenderer {
             | BlockType::Keigakomi
             | BlockType::Yokogumi
             | BlockType::Futoji
-            | BlockType::Shatai => "</div>".to_string(),
+            | BlockType::Shatai
+            | BlockType::Burasage => "</div>".to_string(),
             BlockType::Midashi => {
                 if let Some(level) = params.level {
                     format!("</{}>", midashi_html_tag(level))
@@ -518,37 +736,223 @@ impl HtmlRenderer {
     }
 
     /// HTMLヘッダーを出力
-    fn render_html_head(&self, output: &mut String) {
-        output.push_str("<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n");
-        output.push_str("<!DOCTYPE html PUBLIC \"-//W3C//DTD XHTML 1.1//EN\" \"http://www.w3.org/TR/xhtml11/DTD/xhtml11.dtd\">\n");
-        output.push_str("<html xmlns=\"http://www.w3.org/1999/xhtml\" xml:lang=\"ja\">\n");
-        output.push_str("<head>\n");
+    fn render_html_head(&self, output: &mut String, header_info: &HeaderInfo) {
+        // XML宣言とDOCTYPE
+        output.push_str("<?xml version=\"1.0\" encoding=\"Shift_JIS\"?>\r\n");
+        output.push_str("<!DOCTYPE html PUBLIC \"-//W3C//DTD XHTML 1.1//EN\"\r\n");
+        output.push_str("    \"http://www.w3.org/TR/xhtml11/DTD/xhtml11.dtd\">\r\n");
+        output.push_str("<html xmlns=\"http://www.w3.org/1999/xhtml\" xml:lang=\"ja\" >\r\n");
+        output.push_str("<head>\r\n");
+
+        // メタ情報
         output.push_str(
-            "  <meta http-equiv=\"Content-Type\" content=\"text/html; charset=UTF-8\" />\n",
+            "\t<meta http-equiv=\"Content-Type\" content=\"text/html;charset=Shift_JIS\" />\r\n",
         );
-        output.push_str("  <meta http-equiv=\"Content-Style-Type\" content=\"text/css\" />\n");
+        output.push_str("\t<meta http-equiv=\"content-style-type\" content=\"text/css\" />\r\n");
 
-        if let Some(title) = &self.options.title {
-            output.push_str(&format!("  <title>{}</title>\n", html_escape(title)));
-        } else {
-            output.push_str("  <title></title>\n");
-        }
-
+        // CSSリンク
         for css in &self.options.css_files {
             output.push_str(&format!(
-                "  <link rel=\"stylesheet\" type=\"text/css\" href=\"{css}\" />\n"
+                "\t<link rel=\"stylesheet\" type=\"text/css\" href=\"{css}\" />\r\n"
             ));
         }
 
-        output.push_str("</head>\n");
-        output.push_str("<body>\n");
+        // タイトル
+        let html_title = if let Some(title) = &self.options.title {
+            html_escape(title)
+        } else {
+            header_info.html_title()
+        };
+        output.push_str(&format!("\t<title>{}</title>\r\n", html_title));
+
+        // jQuery
+        output.push_str(
+            "\t<script type=\"text/javascript\" src=\"../../jquery-1.4.2.min.js\"></script>\r\n",
+        );
+
+        // Dublin Core メタデータ
+        output
+            .push_str("  <link rel=\"Schema.DC\" href=\"http://purl.org/dc/elements/1.1/\" />\r\n");
+
+        let dc_title = header_info.title.as_deref().unwrap_or("");
+        let dc_creator = header_info.author.as_deref().unwrap_or("");
+        output.push_str(&format!(
+            "\t<meta name=\"DC.Title\" content=\"{}\" />\r\n",
+            html_escape(dc_title)
+        ));
+        output.push_str(&format!(
+            "\t<meta name=\"DC.Creator\" content=\"{}\" />\r\n",
+            html_escape(dc_creator)
+        ));
+        output.push_str(&format!(
+            "\t<meta name=\"DC.Publisher\" content=\"{}\" />\r\n",
+            AOZORA_BUNKO
+        ));
+
+        output.push_str("</head>\r\n");
+        output.push_str("<body>\r\n");
+    }
+
+    /// メタデータセクションを出力
+    fn render_metadata_section(&self, output: &mut String, header_info: &HeaderInfo) {
+        output.push_str("<div class=\"metadata\">\r\n");
+
+        if let Some(title) = &header_info.title {
+            output.push_str(&format!(
+                "<h1 class=\"title\">{}</h1>\r\n",
+                html_escape(title)
+            ));
+        }
+
+        if let Some(original_title) = &header_info.original_title {
+            output.push_str(&format!(
+                "<h2 class=\"original_title\">{}</h2>\r\n",
+                html_escape(original_title)
+            ));
+        }
+
+        if let Some(subtitle) = &header_info.subtitle {
+            output.push_str(&format!(
+                "<h2 class=\"subtitle\">{}</h2>\r\n",
+                html_escape(subtitle)
+            ));
+        }
+
+        if let Some(original_subtitle) = &header_info.original_subtitle {
+            output.push_str(&format!(
+                "<h2 class=\"original_subtitle\">{}</h2>\r\n",
+                html_escape(original_subtitle)
+            ));
+        }
+
+        if let Some(author) = &header_info.author {
+            output.push_str(&format!(
+                "<h2 class=\"author\">{}</h2>\r\n",
+                html_escape(author)
+            ));
+        }
+
+        if let Some(editor) = &header_info.editor {
+            output.push_str(&format!(
+                "<h2 class=\"editor\">{}</h2>\r\n",
+                html_escape(editor)
+            ));
+        }
+
+        if let Some(translator) = &header_info.translator {
+            output.push_str(&format!(
+                "<h2 class=\"translator\">{}</h2>\r\n",
+                html_escape(translator)
+            ));
+        }
+
+        if let Some(henyaku) = &header_info.henyaku {
+            output.push_str(&format!(
+                "<h2 class=\"editor-translator\">{}</h2>\r\n",
+                html_escape(henyaku)
+            ));
+        }
+
+        output.push_str("<br />\r\n<br />\r\n</div>\r\n");
     }
 
     /// HTMLフッターを出力
     fn render_html_foot(&self, output: &mut String) {
-        output.push_str("</body>\n");
-        output.push_str("</html>\n");
+        output.push_str("</body>\r\n");
+        output.push_str("</html>\r\n");
     }
+
+    /// 底本情報セクションを出力
+    fn render_bibliographical_section(&mut self, output: &mut String, lines: &[&str]) {
+        output.push_str("<div class=\"bibliographical_information\">\r\n");
+        output.push_str("<hr />\r\n");
+        output.push_str("<br />\r\n");
+
+        for line in lines {
+            let line_html = self.render_line(line);
+            output.push_str(&line_html);
+            output.push_str("<br />\r\n");
+        }
+
+        output.push_str("</div>\r\n");
+    }
+
+    /// 表記についてセクションを出力
+    fn render_notation_notes(&self, output: &mut String) {
+        output.push_str("<div class=\"notation_notes\">\r\n");
+        output.push_str("<hr />\r\n");
+        output.push_str("<br />\r\n");
+        output.push_str("●表記について<br />\r\n");
+        output.push_str("<ul>\r\n");
+
+        // XHTML1.1準拠
+        output.push_str(
+            "\t<li>このファイルは W3C 勧告 XHTML1.1 にそった形式で作成されています。</li>\r\n",
+        );
+
+        // 注記を使用した場合
+        if self.has_notes {
+            output.push_str("\t<li>［＃…］は、入力者による注を表す記号です。</li>\r\n");
+        }
+
+        // JIS X 0213文字を画像化した場合
+        if self.has_jisx0213 && !self.options.use_jisx0213 {
+            output.push_str("\t<li>「くの字点」をのぞくJIS X 0213にある文字は、画像化して埋め込みました。</li>\r\n");
+        }
+
+        // アクセント符号を使用した場合
+        if self.has_accent && !self.options.use_jisx0213 {
+            output.push_str(
+                "\t<li>アクセント符号付きラテン文字は、画像化して埋め込みました。</li>\r\n",
+            );
+        }
+
+        output.push_str("</ul>\r\n");
+        output.push_str("</div>\r\n");
+    }
+
+    /// 図書カードセクションを出力
+    fn render_card_section(&self, output: &mut String) {
+        output.push_str("<div id=\"card\">\r\n");
+        output.push_str("<hr />\r\n");
+        output.push_str("<br />\r\n");
+        output.push_str("<a href=\"JavaScript:goLibCard();\" id=\"goAZLibCard\">●図書カード</a>");
+        output.push_str("<script type=\"text/javascript\" src=\"../../contents.js\"></script>\r\n");
+        output
+            .push_str("<script type=\"text/javascript\" src=\"../../golibcard.js\"></script>\r\n");
+        output.push_str("</div>");
+    }
+}
+
+/// 行がブロック要素だけかどうかを判定（<br />を追加しない）
+fn is_block_only_line(html: &str) -> bool {
+    // 空行
+    if html.is_empty() {
+        return false;
+    }
+
+    // ブロック開始タグのみで終わる（jisage, chitsuki, midashi など）
+    if html.ends_with("\">") {
+        // divで始まりdivで終わる場合（ブロック開始のみ）
+        if html.starts_with("<div class=\"jisage")
+            || html.starts_with("<div class=\"chitsuki")
+            || html.starts_with("<div class=\"jizume")
+        {
+            return true;
+        }
+    }
+
+    // 見出しで終わる（</h3>, </h4>, </h5>）
+    if html.ends_with("</h3>") || html.ends_with("</h4>") || html.ends_with("</h5>") {
+        return true;
+    }
+
+    // ブロック終了タグで終わる（</div>）
+    if html.ends_with("</div>") {
+        return true;
+    }
+
+    false
 }
 
 /// HTMLエスケープ
