@@ -30,11 +30,10 @@ Converts Aozora Bunko format to HTML.
 
 ```bash
 aozora2 html input.txt -o output.html
-aozora2 html input.txt --full-document --title "Title" -o output.html
+aozora2 html input.txt --title "Title" -o output.html
 ```
 
 Options:
-- `--full-document` - Generate a complete HTML document
 - `--title <TITLE>` - Document title
 - `--gaiji-dir <DIR>` - Gaiji (external character) image directory
 - `--css-files <FILES>` - CSS files (comma-separated)

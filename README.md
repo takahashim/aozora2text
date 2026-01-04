@@ -30,11 +30,10 @@ cat input.txt | aozora2 strip > output.txt
 
 ```bash
 aozora2 html input.txt -o output.html
-aozora2 html input.txt --full-document --title "タイトル" -o output.html
+aozora2 html input.txt --title "タイトル" -o output.html
 ```
 
 オプション:
-- `--full-document` - 完全なHTMLドキュメントを生成
 - `--title <TITLE>` - ドキュメントのタイトル
 - `--gaiji-dir <DIR>` - 外字画像ディレクトリ
 - `--css-files <FILES>` - CSSファイル（カンマ区切り）
