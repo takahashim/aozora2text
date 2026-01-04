@@ -17,10 +17,10 @@ use super::presentation::{
 /// 未変換外字情報
 #[derive(Debug, Clone)]
 pub struct UnconvertedGaiji {
-    /// 外字説明
-    pub description: String,
-    /// Unicode文字列（あれば）
-    pub unicode: Option<String>,
+    /// 外字名（説明の最後の「、」より前の部分）
+    pub gaiji_name: String,
+    /// ページ-行数（説明の最後の「、」より後の部分）
+    pub page_line: String,
 }
 
 /// ノードレンダラー
@@ -362,7 +362,7 @@ impl<'a> NodeRenderer<'a> {
                 }
                 // JISコードがないので画像化できない → 注記として出力
                 self.has_notes = true;
-                self.add_unconverted_gaiji(description, Some(u));
+                self.add_unconverted_gaiji(description);
                 return format!(
                     "※<span class=\"notes\">［＃{}］</span>",
                     html_escape(description)
@@ -390,7 +390,7 @@ impl<'a> NodeRenderer<'a> {
                     s.chars().map(|c| format!("&#{};", c as u32)).collect()
                 } else {
                     self.has_notes = true;
-                    self.add_unconverted_gaiji(description, Some(&s));
+                    self.add_unconverted_gaiji(description);
                     format!(
                         "※<span class=\"notes\">［＃{}］</span>",
                         html_escape(description)
@@ -429,7 +429,7 @@ impl<'a> NodeRenderer<'a> {
             }
             GaijiResult::Unconvertible => {
                 self.has_notes = true;
-                self.add_unconverted_gaiji(description, None);
+                self.add_unconverted_gaiji(description);
                 format!(
                     "※<span class=\"notes\">［＃{}］</span>",
                     html_escape(description)
@@ -439,18 +439,27 @@ impl<'a> NodeRenderer<'a> {
     }
 
     /// 未変換外字を追加（重複を避ける）
-    fn add_unconverted_gaiji(&mut self, description: &str, unicode: Option<&str>) {
+    fn add_unconverted_gaiji(&mut self, description: &str) {
+        // descriptionを最後の「、」で分解（外字説明とページ-行数を分離）
+        let (gaiji_name, page_line) = if let Some(last_comma_pos) = description.rfind('、') {
+            let name = &description[..last_comma_pos];
+            let line = &description[last_comma_pos + '、'.len_utf8()..];
+            (name.to_string(), line.to_string())
+        } else {
+            (description.to_string(), String::new())
+        };
+
         // 既に追加済みの場合はスキップ
         if self
             .unconverted_gaiji
             .iter()
-            .any(|g| g.description == description)
+            .any(|g| g.gaiji_name == gaiji_name)
         {
             return;
         }
         self.unconverted_gaiji.push(UnconvertedGaiji {
-            description: description.to_string(),
-            unicode: unicode.map(|s| s.to_string()),
+            gaiji_name,
+            page_line,
         });
     }
 

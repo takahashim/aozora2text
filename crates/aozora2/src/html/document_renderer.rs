@@ -173,6 +173,8 @@ impl<'a> DocumentRenderer<'a> {
 
     /// 底本情報セクションフッターを出力
     pub fn render_bibliographical_footer(&self, output: &mut String) {
+        output.push_str("<br />\r\n");
+        output.push_str("<br />\r\n");
         output.push_str("</div>\r\n");
     }
 
@@ -223,34 +225,30 @@ impl<'a> DocumentRenderer<'a> {
         // 外字一覧表を出力
         if !unconverted_gaiji.is_empty() {
             output.push_str("<br />\r\n");
-            output.push_str("<table class=\"gaiji_list\">\r\n");
+            output.push_str("\t\t<table class=\"gaiji_list\">\r\n");
             for gaiji in unconverted_gaiji {
-                output.push_str("\t<tr>\r\n");
-                // 外字説明（descriptionにU+が含まれていない場合のみUnicodeコードポイントを追加）
-                let desc = html_escape(&gaiji.description);
-                let gaiji_desc = if let Some(ref unicode) = gaiji.unicode {
-                    if desc.contains("U+") {
-                        // 既にdescriptionにUnicodeコードポイントがある場合は追加しない
-                        desc
-                    } else {
-                        // Unicodeコードポイントを計算して追加
-                        let code_points: String = unicode
-                            .chars()
-                            .map(|c| format!("U+{:04X}", c as u32))
-                            .collect::<Vec<_>>()
-                            .join(", ");
-                        format!("{}、{}", desc, code_points)
-                    }
-                } else {
-                    desc
-                };
-                output.push_str(&format!("\t\t<td>{}</td>\r\n", gaiji_desc));
-                output.push_str("\t\t<td>&nbsp;&nbsp;</td>\r\n");
-                // ページ-行数（現在は未実装なので空）
-                output.push_str("\t\t<td></td>\r\n");
-                output.push_str("\t</tr>\r\n");
+                output.push_str("\t\t\t<tr>\r\n");
+
+                let gaiji_name = html_escape(&gaiji.gaiji_name);
+                let page_line = html_escape(&gaiji.page_line);
+
+                output.push_str(&format!(
+                    "\t\t\t\t<td>\r\n\t\t\t\t{}\r\n\t\t\t\t</td>\r\n",
+                    gaiji_name
+                ));
+                output.push_str("\t\t\t\t<td>&nbsp;&nbsp;</td>\r\n");
+                output.push_str(&format!(
+                    "\t\t\t\t<td>\r\n{}\t\t\t\t</td>\r\n",
+                    page_line
+                ));
+                // コメント出力
+                output.push_str(&format!(
+                    "\t\t\t\t<!--\r\n\t\t\t\t<td>\r\n\t\t\t\t　　<img src=\"../../../gaiji/others/xxxx.png\" alt=\"{}\" width=32 height=32 />\r\n\t\t\t\t</td>\r\n\t\t\t\t-->\r\n",
+                    gaiji_name
+                ));
+                output.push_str("\t\t\t</tr>\r\n");
             }
-            output.push_str("</table>\r\n");
+            output.push_str("\t\t</table>\r\n");
         }
 
         output.push_str("</div>\r\n");

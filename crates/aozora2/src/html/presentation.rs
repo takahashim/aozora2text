@@ -200,55 +200,17 @@ pub fn is_block_only_line(html: &str) -> bool {
 
 /// 後付け（bibliographical_information）内のテキストを自動リンク化
 ///
-/// 以下のパターンを検出してリンク化する：
-/// - `label（http://...）` → `<a href="http://...">label（http://...）</a>`
-/// - `label（https://...）` → `<a href="https://...">label（https://...）</a>`
-///
-/// labelは直前の区切り文字（、。や空白）からURLの括弧開始までのテキスト
+/// 以下の固定文字列のみをリンク化する：
+/// - `info@aozora.gr.jp` → `<a href="mailto:info@aozora.gr.jp">info@aozora.gr.jp</a>`
+/// - `青空文庫（http://www.aozora.gr.jp/）` → `<a href="http://www.aozora.gr.jp/">青空文庫（http://www.aozora.gr.jp/）</a>`
 pub fn auto_link(text: &str) -> String {
-    // パターン: ラベル + （http://...） または （https://...）
-    // 例: 青空文庫（http://www.aozora.gr.jp/）
+    const EMAIL: &str = "info@aozora.gr.jp";
+    const EMAIL_LINK: &str = "<a href=\"mailto:info@aozora.gr.jp\">info@aozora.gr.jp</a>";
+    const AOZORA: &str = "青空文庫（http://www.aozora.gr.jp/）";
+    const AOZORA_LINK: &str =
+        "<a href=\"http://www.aozora.gr.jp/\">青空文庫（http://www.aozora.gr.jp/）</a>";
 
-    // http:// または https:// を含む（...）を探す
-    if let Some(paren_pos) = text.find("（http://").or_else(|| text.find("（https://")) {
-        if let Some(close_offset) = text[paren_pos..].find('）') {
-            let close_pos = paren_pos + close_offset;
-            let url = &text[paren_pos + "（".len()..close_pos];
-
-            // ラベルを抽出（直前の区切り文字から）
-            let label_start = find_label_start(&text[..paren_pos]);
-            let before_label = &text[..label_start];
-            let label = &text[label_start..paren_pos];
-            let suffix = &text[close_pos + "）".len()..];
-
-            // リンク化
-            let linked = format!(
-                "{}<a href=\"{}\">{}（{}）</a>",
-                before_label, url, label, url
-            );
-
-            // 残りの部分も再帰的に処理
-            return format!("{}{}", linked, auto_link(suffix));
-        }
-    }
-
-    text.to_string()
-}
-
-/// ラベルの開始位置を見つける（区切り文字の次の位置）
-fn find_label_start(text: &str) -> usize {
-    // 区切り文字: 、。！？　（全角スペース）など
-    let separators = ['、', '。', '！', '？', '　', ' ', '「', '『', '（', '\n'];
-
-    // 末尾から区切り文字を探す
-    for (i, ch) in text.char_indices().rev() {
-        if separators.contains(&ch) {
-            return i + ch.len_utf8();
-        }
-    }
-
-    // 区切り文字がなければ先頭から
-    0
+    text.replace(EMAIL, EMAIL_LINK).replace(AOZORA, AOZORA_LINK)
 }
 
 #[cfg(test)]
@@ -256,28 +218,35 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_auto_link() {
+    fn test_auto_link_aozora() {
         let input = "青空文庫（http://www.aozora.gr.jp/）";
         let expected = "<a href=\"http://www.aozora.gr.jp/\">青空文庫（http://www.aozora.gr.jp/）</a>";
         assert_eq!(auto_link(input), expected);
     }
 
     #[test]
-    fn test_auto_link_with_prefix() {
+    fn test_auto_link_aozora_with_prefix() {
         let input = "インターネットの図書館、青空文庫（http://www.aozora.gr.jp/）で作られました";
         let expected = "インターネットの図書館、<a href=\"http://www.aozora.gr.jp/\">青空文庫（http://www.aozora.gr.jp/）</a>で作られました";
         assert_eq!(auto_link(input), expected);
     }
 
     #[test]
-    fn test_auto_link_https() {
-        let input = "サイト（https://example.com/）";
-        let expected = "<a href=\"https://example.com/\">サイト（https://example.com/）</a>";
+    fn test_auto_link_email() {
+        let input = "info@aozora.gr.jp";
+        let expected = "<a href=\"mailto:info@aozora.gr.jp\">info@aozora.gr.jp</a>";
         assert_eq!(auto_link(input), expected);
     }
 
     #[test]
     fn test_auto_link_no_match() {
+        // 固定文字列以外はリンク化しない
+        let input = "サイト（https://example.com/）";
+        assert_eq!(auto_link(input), input);
+    }
+
+    #[test]
+    fn test_auto_link_plain_text() {
         let input = "普通のテキストです";
         assert_eq!(auto_link(input), input);
     }
